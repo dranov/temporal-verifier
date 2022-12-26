@@ -22,6 +22,7 @@ use crate::{
 pub trait Backend {
     fn get_cmd(&self) -> SolverCmd;
 
+    // ODED: I would rename this to parse_model
     fn parse(
         &self,
         sig: &Signature,
@@ -45,6 +46,8 @@ pub struct FOModel {
 ///
 /// The Backend makes it possible to parse and return models in the compact
 /// representation of `semantics::Model`.
+// ODED: can this be `pub struct Solver<B: Backend> {`? I think it would make
+// more sense
 pub struct Solver<B> {
     proc: SmtProc,
     signature: Signature,
@@ -138,6 +141,7 @@ impl<B: Backend> Solver<B> {
 
     /// The `assumptions` map should map indicator variables to whether they
     /// should be assumed true or false.
+    // ODED: I think assumptions should be &[Term], and then you would use Id(_) or Not(Id(_))
     pub fn check_sat(&mut self, assumptions: HashMap<Term, bool>) -> Result<SatResp, SolverError> {
         if cfg!(debug_assertions) {
             for assumption in assumptions.keys() {
@@ -173,6 +177,8 @@ impl<B: Backend> Solver<B> {
     /// After a sat response to check_sat or check_sat_assuming, produce a trace
     /// of models, one per state. Each model interprets all of the symbols in
     /// the signature.
+    // ODED: this should also return a valuation for the indicator variables,
+    // i.e., the return type should be  (Vec<Model>, HashMap<Term, bool>).
     pub fn get_model(&mut self) -> Vec<Model> {
         let model = self
             .proc
@@ -190,6 +196,8 @@ impl<B: Backend> Solver<B> {
 
     /// Returns an unsat core as a set of indicator variables (a subset of the
     /// assumptions passed to `check_sat`).
+    // ODED: I think the return type here should be HashSet<Term>, with Id(_) or
+    // Not(Id(_)) in the set.
     pub fn get_unsat_core(&mut self) -> HashMap<Term, bool> {
         let indicators = self
             .proc
@@ -227,6 +235,12 @@ impl<B: Backend> Solver<B> {
         todo!()
     }
 
+    // TODO(oded): self.asserts isn't correct with pushing and poping, we should
+    // either make it a stack of vectors or have another stack of indices into
+    // the assertions vector
+
+    // ODED: why aren't push and pop methods of SmtProc?
+
     pub fn push(&mut self) {
         self.proc.send(&app("push", []));
     }
@@ -237,6 +251,8 @@ impl<B: Backend> Solver<B> {
 }
 
 impl FOModel {
+    // ODED: I think this should also return the indicator variable assignment,
+    // or maybe that will be another method
     fn into_trace(self, signature: &Signature, n_states: usize) -> Vec<Model> {
         let universe: Universe = signature
             .sorts
@@ -245,6 +261,7 @@ impl FOModel {
                 if let Sort::Id(s) = s {
                     self.universe[s]
                 } else {
+                    // ODED: I think this can happen, we should default to 1
                     panic!("unexpected sort in signature")
                 }
             })
@@ -257,6 +274,7 @@ impl FOModel {
                 .map(|r| {
                     let relation = format!("{r}{primes}", r = &r.name, primes = "'".repeat(n));
                     self.interp[&relation].clone()
+                    // ODED: if relation isn't in interp we should use a default
                 })
                 .collect::<Vec<_>>();
             let model = Model::new(signature, &universe, interp);

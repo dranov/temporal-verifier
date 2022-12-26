@@ -10,9 +10,13 @@ use regex::Regex;
 
 use crate::smtlib::sexp::{atom_s, sexp_l, Atom, Sexp};
 
+// ODED: I would rename this SmtModel
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Model {
     pub universes: HashMap<String, Vec<String>>,
+    // ODED: I think the symbols here should also have the types, similar to the
+    // output of (get-model). This way, the signature is not needed to make
+    // sense of this.
     pub symbols: HashMap<String, (Vec<String>, Sexp)>,
 }
 
@@ -111,6 +115,8 @@ pub fn smt_eval(e: &Sexp) -> Result<Atom, EvalError> {
     }
 }
 
+// ODED: I think this should return Vec<(String, String)>, i.e., with the types
+// included.
 fn parse_binders(binders: &Sexp) -> Vec<String> {
     let binder_sexps = binders.list().unwrap();
     binder_sexps

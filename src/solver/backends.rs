@@ -76,6 +76,7 @@ impl Backend for &GenericBackend {
         }
     }
 
+    // ODED: I don't think this function should use sig, n_states, or indicators
     fn parse(
         &self,
         sig: &Signature,
@@ -84,7 +85,11 @@ impl Backend for &GenericBackend {
         indicators: &HashSet<String>,
         model: &sexp::Sexp,
     ) -> FOModel {
-        let model = match self.solver_type {
+        let model: models::Model = match self.solver_type {
+            // ODED: it seems that the only solver-specific part is here, i.e.,
+            // when going from an Sexp to a models::Model. So maybe the Backend
+            // trait should have that as the function, and the functionality
+            // here can be implemented in the Solver instead of the Backend.
             SolverType::Z3 => models::parse_z3(model),
             SolverType::Cvc4 => models::parse_cvc(model, false),
             SolverType::Cvc5 => models::parse_cvc(model, true),
@@ -98,6 +103,7 @@ impl Backend for &GenericBackend {
 
         let mut interps = HashMap::new();
         for (symbol, (binders, body)) in model.symbols {
+            // ODED: I think we want the indicator variables in the FO model
             if indicators.contains(&symbol) {
                 continue;
             }
