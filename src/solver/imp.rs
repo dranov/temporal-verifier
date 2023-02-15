@@ -23,7 +23,7 @@ use crate::{
 /// thus there are meaningful differences in the format of how solvers respond
 /// to `(get-model)`).
 pub trait Backend {
-    fn get_cmd(&self) -> SolverCmd;
+    fn get_cmd(&self) -> &SolverCmd;
 
     fn parse(
         &self,

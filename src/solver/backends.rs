@@ -33,15 +33,33 @@ pub enum SolverType {
 #[derive(Debug, Clone)]
 pub struct GenericBackend {
     solver_type: SolverType,
-    bin: String,
+    cmd: SolverCmd,
 }
 
 impl GenericBackend {
     pub fn new(solver_type: SolverType, bin: &str) -> Self {
-        Self {
-            solver_type,
-            bin: bin.to_string(),
-        }
+        // TODO: move Z3Conf and CvcConf into this module
+        let cmd = match solver_type {
+            SolverType::Z3 => {
+                let mut conf = Z3Conf::new(bin);
+                conf.model_compact();
+                conf.done()
+            }
+            SolverType::Cvc4 => {
+                let mut conf = CvcConf::new_cvc4(bin);
+                conf.finite_models();
+                conf.interleave_enumerative_instantiation();
+                conf.done()
+            }
+            SolverType::Cvc5 => {
+                let mut conf = CvcConf::new_cvc5(bin);
+                conf.finite_models();
+                conf.interleave_enumerative_instantiation();
+                conf.done()
+            }
+        };
+
+        Self { solver_type, cmd }
     }
 }
 
@@ -55,27 +73,8 @@ fn sort_cardinality(universes: &HashMap<String, usize>, sort: &Sort) -> usize {
 }
 
 impl Backend for &GenericBackend {
-    fn get_cmd(&self) -> SolverCmd {
-        // TODO: move Z3Conf and CvcConf into this module
-        match self.solver_type {
-            SolverType::Z3 => {
-                let mut conf = Z3Conf::new(&self.bin);
-                conf.model_compact();
-                conf.done()
-            }
-            SolverType::Cvc4 => {
-                let mut conf = CvcConf::new_cvc4(&self.bin);
-                conf.finite_models();
-                conf.interleave_enumerative_instantiation();
-                conf.done()
-            }
-            SolverType::Cvc5 => {
-                let mut conf = CvcConf::new_cvc5(&self.bin);
-                conf.finite_models();
-                conf.interleave_enumerative_instantiation();
-                conf.done()
-            }
-        }
+    fn get_cmd(&self) -> &SolverCmd {
+        &self.cmd
     }
 
     fn parse(
@@ -204,10 +203,7 @@ mod tests {
             .trim(),
         );
 
-        let backend = GenericBackend {
-            solver_type: SolverType::Z3,
-            bin: "z3".to_string(),
-        };
+        let backend = GenericBackend::new(SolverType::Z3, "z3");
 
         let model_text =
             fs::read_to_string("tests/issue_5_model.sexp").expect("could not find model file");

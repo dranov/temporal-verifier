@@ -145,6 +145,8 @@ impl CvcConf {
         cmd.option("interactive", "false");
         cmd.option("incremental", "true");
         cmd.option("seed", "1");
+        cmd.option("produce-models", "true");
+        cmd.option("produce-unsat-assumptions", "true");
         Self { version5, cmd }
     }
 
@@ -192,9 +194,7 @@ impl SmtProc {
     ///
     /// The optional `tee` argument redirects all SMT output to a file, for
     /// debugging purposes.
-    pub fn new(mut cmd: SolverCmd, tee: Option<&Path>) -> Result<Self> {
-        cmd.option("produce-models", "true");
-        cmd.option("produce-unsat-assumptions", "true");
+    pub fn new(cmd: &SolverCmd, tee: Option<&Path>) -> Result<Self> {
         let mut child = Command::new(OsStr::new(&cmd.cmd))
             .args(cmd.args.iter().map(OsString::from))
             .stdin(Stdio::piped())
@@ -414,7 +414,7 @@ mod tests {
     #[test]
     fn test_check_sat_z3() {
         let z3 = Z3Conf::new("z3").done();
-        let mut solver = SmtProc::new(z3, None).unwrap();
+        let mut solver = SmtProc::new(&z3, None).unwrap();
         let response = solver.check_sat().wrap_err("could not check-sat").unwrap();
         assert!(
             matches!(response, SatResp::Sat { .. }),
@@ -425,7 +425,7 @@ mod tests {
     #[test]
     fn test_get_model_z3() {
         let z3 = Z3Conf::new("z3").done();
-        let mut solver = SmtProc::new(z3, None).unwrap();
+        let mut solver = SmtProc::new(&z3, None).unwrap();
         solver.send(&app("declare-const", [atom_s("a"), atom_s("Bool")]));
 
         let e = parse("(assert (and a (not a)))").unwrap();
@@ -442,7 +442,7 @@ mod tests {
     /// reject (or b) (it requires 2 or more disjuncts to the or).
     fn test_cvc5_singleton_or() {
         let cvc5 = CvcConf::new_cvc5("cvc5").done();
-        let mut solver = if let Ok(solver) = SmtProc::new(cvc5, None) {
+        let mut solver = if let Ok(solver) = SmtProc::new(&cvc5, None) {
             solver
         } else {
             eprintln!("could not find cvc5, skipping test");
@@ -464,7 +464,7 @@ mod tests {
         #[cfg(not(target_os = "macos"))]
         let num_iters = 1000;
         for _ in 0..num_iters {
-            let _ = SmtProc::new(z3.clone(), None).unwrap();
+            let _ = SmtProc::new(&z3, None).unwrap();
         }
     }
 }
