@@ -19,11 +19,15 @@ use crate::{
 };
 
 pub struct SolverConf {
-    pub backend: GenericBackend,
-    pub tee: Option<PathBuf>,
+    backend: GenericBackend,
+    tee: Option<PathBuf>,
 }
 
 impl SolverConf {
+    pub fn new(backend: GenericBackend, tee: Option<PathBuf>) -> Self {
+        Self { backend, tee }
+    }
+
     pub fn solver(&self, sig: &Signature, n_states: usize) -> Solver<&GenericBackend> {
         // TODO: failures to start the solver should be bubbled up to user nicely
         Solver::new(sig, n_states, &self.backend, self.tee.as_deref())

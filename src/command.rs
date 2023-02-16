@@ -164,10 +164,7 @@ impl SolverArgs {
         } else {
             None
         };
-        SolverConf {
-            backend: GenericBackend::new(backend_type, &solver_bin),
-            tee,
-        }
+        SolverConf::new(GenericBackend::new(backend_type, &solver_bin), tee)
     }
 }
 
