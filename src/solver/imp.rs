@@ -312,6 +312,15 @@ impl<B: Backend> Solver<B> {
     pub fn pop(&mut self) {
         self.proc.send(&app("pop", []));
     }
+
+    /// Workaround to reset indicators after pop().
+    ///
+    /// We should track a stack of indicator variables and remove the correct
+    /// ones on pop automatically.
+    #[allow(dead_code)]
+    pub fn reset_indicators(&mut self) {
+        self.indicators = HashSet::new();
+    }
 }
 
 impl FOModel {

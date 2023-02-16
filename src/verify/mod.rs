@@ -6,6 +6,7 @@
 mod error;
 pub use error::*;
 mod module;
+mod solvers;
 pub use module::verify_module;
-pub use module::SolverConf;
+pub use solvers::{SolverConf, SolverManager};
 mod safety;

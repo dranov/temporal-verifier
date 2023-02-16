@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 
 use super::error::{AssertionFailure, FailureType, QueryError, SolveError};
 use super::safety::InvariantAssertion;
+use super::SolverConf;
 use crate::fly::syntax::Proof;
 use crate::term::Next;
 use crate::{
@@ -14,26 +14,9 @@ use crate::{
         syntax::{Module, Signature, Term, ThmStmt},
     },
     smtlib::proc::SatResp,
-    solver::{backends::GenericBackend, Backend, Solver},
+    solver::{Backend, Solver},
     term::FirstOrder,
 };
-
-pub struct SolverConf {
-    backend: GenericBackend,
-    tee: Option<PathBuf>,
-}
-
-impl SolverConf {
-    pub fn new(backend: GenericBackend, tee: Option<PathBuf>) -> Self {
-        Self { backend, tee }
-    }
-
-    pub fn solver(&self, sig: &Signature, n_states: usize) -> Solver<&GenericBackend> {
-        // TODO: failures to start the solver should be bubbled up to user nicely
-        Solver::new(sig, n_states, &self.backend, self.tee.as_deref())
-            .expect("could not start solver")
-    }
-}
 
 fn verify_term<B: Backend>(solver: &mut Solver<B>, t: Term) -> Result<(), QueryError> {
     solver.assert(&Term::negate(t));
@@ -268,19 +251,17 @@ mod tests {
     use crate::{
         fly::{self, syntax::Module},
         solver::backends::{GenericBackend, SolverType},
+        verify::SolverConf,
     };
 
-    use super::{verify_module, SolveError, SolverConf};
+    use super::{verify_module, SolveError};
 
     fn z3_verify(m: &Module) -> Result<(), SolveError> {
         // optionally override Z3 command
         let z3_cmd = env::var_os("Z3_BIN")
             .map(|val| val.to_string_lossy().to_string())
             .unwrap_or("z3".to_string());
-        let conf = SolverConf {
-            backend: GenericBackend::new(SolverType::Z3, &z3_cmd),
-            tee: None,
-        };
+        let conf = SolverConf::new(GenericBackend::new(SolverType::Z3, &z3_cmd), None);
         verify_module(&conf, m, false)
     }
 

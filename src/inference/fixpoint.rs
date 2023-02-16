@@ -1,7 +1,7 @@
 // Copyright 2022-2023 VMware, Inc.
 // SPDX-License-Identifier: BSD-2-Clause
 
-use std::rc::Rc;
+use std::{rc::Rc, time::Instant};
 
 use crate::{
     fly::{semantics::Model, syntax::Module},
@@ -9,11 +9,13 @@ use crate::{
         basics::{input_cfg, FOModule, Frame},
         pdnf::PDNF,
     },
-    verify::SolverConf,
+    verify::{SolverConf, SolverManager},
 };
 
 /// Run a simple fixpoint algorithm on the configured lemma domain.
-pub fn run_fixpoint(conf: Rc<SolverConf>, m: &Module, extend_models: bool, disj: bool) {
+pub fn run_fixpoint(conf: SolverConf, m: &Module, extend_models: bool, disj: bool) {
+    let start = Instant::now();
+    let mut mgr = SolverManager::new(conf, &m.signature, 2);
     let fo = Rc::new(FOModule::new(m, disj));
 
     println!("Axioms:");
@@ -37,7 +39,6 @@ pub fn run_fixpoint(conf: Rc<SolverConf>, m: &Module, extend_models: bool, disj:
         vec![cfg.quantify_false(PDNF::get_false(kpdnf, kpdnf_lit))],
         fo.clone(),
         cfg.clone(),
-        conf.clone(),
     );
     let mut frame_t = frame.to_terms();
     let mut models: Vec<Model> = vec![];
@@ -53,7 +54,7 @@ pub fn run_fixpoint(conf: Rc<SolverConf>, m: &Module, extend_models: bool, disj:
 
     // Begin by overapproximating the initial states.
     let mut i_init = (0, 0);
-    while let Some(model) = frame.get_cex_init(Some(&mut i_init)) {
+    while let Some(model) = frame.get_cex_init(&mut mgr, Some(&mut i_init)) {
         print(&frame, "CTI found, type=initial");
         frame.weaken(&model, |_| true, &atoms, Some(i_init));
         if extend_models {
@@ -68,7 +69,8 @@ pub fn run_fixpoint(conf: Rc<SolverConf>, m: &Module, extend_models: bool, disj:
         loop {
             let mut i_extend = (0, 0);
             while !models.is_empty() {
-                if let Some(model) = frame.get_cex_extend(&models[0], Some(&mut i_extend)) {
+                if let Some(model) = frame.get_cex_extend(&mut mgr, &models[0], Some(&mut i_extend))
+                {
                     print(&frame, "CTI found, type=extended");
                     frame.weaken(&model, |_| true, &atoms, Some(i_extend));
                     models.push(model);
@@ -79,7 +81,7 @@ pub fn run_fixpoint(conf: Rc<SolverConf>, m: &Module, extend_models: bool, disj:
                 }
             }
 
-            if let Some((_, model)) = frame.get_cex_trans(&frame_t, Some(&mut i_trans)) {
+            if let Some((_, model)) = frame.get_cex_trans(&mut mgr, &frame_t, Some(&mut i_trans)) {
                 print(&frame, "CTI found, type=transition");
                 frame.weaken(&model, |_| true, &atoms, Some(i_trans));
                 if extend_models {
@@ -99,9 +101,11 @@ pub fn run_fixpoint(conf: Rc<SolverConf>, m: &Module, extend_models: bool, disj:
         frame_t = frame.to_terms();
 
         print(&frame, "Frame updated");
+        mgr.print_stats();
+        println!("inference: {:.1}s", start.elapsed().as_secs_f64());
 
         // Verify safety of updated frame.
-        if fo.trans_safe_cex(&conf, &frame_t).is_some() {
+        if fo.trans_safe_cex(&mut mgr, &frame_t).is_some() {
             println!();
             println!("Frame is unsafe! Aborting.");
             return;
@@ -113,4 +117,8 @@ pub fn run_fixpoint(conf: Rc<SolverConf>, m: &Module, extend_models: bool, disj:
     for lemma in &frame_t {
         println!("    {}", lemma);
     }
+
+    println!();
+    mgr.print_stats();
+    println!("inference: {:.1}s", start.elapsed().as_secs_f64());
 }

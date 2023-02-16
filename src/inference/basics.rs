@@ -7,6 +7,7 @@ use std::io::BufRead;
 use std::io::Write;
 use std::rc::Rc;
 
+use crate::verify::SolverManager;
 use crate::{
     fly::{
         semantics::Model,
@@ -15,7 +16,6 @@ use crate::{
     inference::lemma::{Lemma, LemmaQF, QuantifierConfig},
     smtlib::proc::SatResp,
     term::{FirstOrder, Next},
-    verify::SolverConf,
 };
 
 /// A first-order module is represented using first-order formulas,
@@ -23,7 +23,6 @@ use crate::{
 /// and double-vocabulary transition assertions.
 /// `disj` denotes whether to split the transitions disjunctively, if possible.
 pub struct FOModule {
-    signature: Signature,
     pub axioms: Vec<Term>,
     pub inits: Vec<Term>,
     pub transitions: Vec<Term>,
@@ -34,7 +33,6 @@ pub struct FOModule {
 impl FOModule {
     pub fn new(m: &Module, disj: bool) -> Self {
         let mut fo = FOModule {
-            signature: m.signature.clone(),
             axioms: vec![],
             inits: vec![],
             transitions: vec![],
@@ -68,27 +66,33 @@ impl FOModule {
         fo
     }
 
-    pub fn init_cex(&self, conf: &SolverConf, t: &Term) -> Option<Model> {
-        let mut solver = conf.solver(&self.signature, 1);
-        for a in self.axioms.iter().chain(self.inits.iter()) {
-            solver.assert(a);
-        }
-        solver.assert(&Term::negate(t.clone()));
-
-        let resp = solver.check_sat(HashMap::new()).expect("error in solver");
-        match resp {
-            SatResp::Sat => {
-                let mut states = solver.get_minimal_model();
-                assert_eq!(states.len(), 1);
-
-                Some(states.remove(0))
+    pub fn init_cex(&self, mgr: &mut SolverManager, t: &Term) -> Option<Model> {
+        mgr.with_solver(|solver| {
+            for a in self.axioms.iter().chain(self.inits.iter()) {
+                solver.assert(a);
             }
-            SatResp::Unsat => None,
-            SatResp::Unknown(_) => panic!(),
-        }
+            solver.assert(&Term::negate(t.clone()));
+
+            let resp = solver.check_sat(HashMap::new()).expect("error in solver");
+            match resp {
+                SatResp::Sat => {
+                    let mut states = solver.get_minimal_model();
+                    // assert_eq!(states.len(), 1);
+
+                    return Some(states.remove(0));
+                }
+                SatResp::Unsat => None,
+                SatResp::Unknown(reason) => panic!("unexpected solver unknown {reason}"),
+            }
+        })
     }
 
-    pub fn trans_cex(&self, conf: &SolverConf, hyp: &[Term], t: &Term) -> Option<(Model, Model)> {
+    pub fn trans_cex(
+        &self,
+        mgr: &mut SolverManager,
+        hyp: &[Term],
+        t: &Term,
+    ) -> Option<(Model, Model)> {
         let disj_trans = if self.disj {
             self.transitions
                 .iter()
@@ -103,40 +107,45 @@ impl FOModule {
         };
 
         for trans in disj_trans {
-            let mut solver = conf.solver(&self.signature, 2);
-            for a in self
-                .axioms
-                .iter()
-                .chain(self.safeties.iter())
-                .chain(hyp.iter())
-                .chain(trans.into_iter())
-            {
-                solver.assert(a);
-            }
-            for a in self.axioms.iter() {
-                solver.assert(&Next::prime(a));
-            }
-            solver.assert(&Term::negate(Next::prime(t)));
-
-            let resp = solver.check_sat(HashMap::new()).expect("error in solver");
-            match resp {
-                SatResp::Sat => {
-                    let states = solver.get_minimal_model();
-                    assert_eq!(states.len(), 2);
-
-                    return Some(states.into_iter().collect_tuple().unwrap());
+            let cex = mgr.with_solver(|solver| -> Option<(Model, Model)> {
+                for a in self
+                    .axioms
+                    .iter()
+                    .chain(self.safeties.iter())
+                    .chain(hyp.iter())
+                    .chain(trans.into_iter())
+                {
+                    solver.assert(a);
                 }
-                SatResp::Unsat => (),
-                SatResp::Unknown(_) => panic!(),
+                for a in self.axioms.iter() {
+                    solver.assert(&Next::prime(a));
+                }
+                solver.assert(&Term::negate(Next::prime(t)));
+
+                let resp = solver.check_sat(HashMap::new()).expect("error in solver");
+                match resp {
+                    SatResp::Sat => {
+                        let states = solver.get_minimal_model();
+                        assert_eq!(states.len(), 2);
+
+                        return Some(states.into_iter().collect_tuple().unwrap());
+                    }
+                    SatResp::Unsat => (),
+                    SatResp::Unknown(_) => panic!(),
+                }
+                return None;
+            });
+            // bubble up from solver run
+            if let Some(cex) = cex {
+                return Some(cex);
             }
         }
-
         None
     }
 
-    pub fn trans_safe_cex(&self, conf: &SolverConf, hyp: &[Term]) -> Option<Model> {
+    pub fn trans_safe_cex(&self, mgr: &mut SolverManager, hyp: &[Term]) -> Option<Model> {
         for s in self.safeties.iter() {
-            if let Some(models) = self.trans_cex(conf, hyp, s) {
+            if let Some(models) = self.trans_cex(mgr, hyp, s) {
                 return Some(models.0);
             }
         }
@@ -158,16 +167,10 @@ pub struct Frame<T: LemmaQF> {
     entries: Vec<FrameEntry<T>>,
     fo: Rc<FOModule>,
     cfg: Rc<QuantifierConfig>,
-    conf: Rc<SolverConf>,
 }
 
 impl<T: LemmaQF> Frame<T> {
-    pub fn new(
-        lemmas: Vec<Lemma<T>>,
-        fo: Rc<FOModule>,
-        cfg: Rc<QuantifierConfig>,
-        conf: Rc<SolverConf>,
-    ) -> Self {
+    pub fn new(lemmas: Vec<Lemma<T>>, fo: Rc<FOModule>, cfg: Rc<QuantifierConfig>) -> Self {
         Frame {
             entries: lemmas
                 .into_iter()
@@ -179,7 +182,6 @@ impl<T: LemmaQF> Frame<T> {
                 .collect_vec(),
             fo,
             cfg,
-            conf,
         }
     }
 
@@ -191,6 +193,7 @@ impl<T: LemmaQF> Frame<T> {
     /// Get a counter-example to induction which extends a specific model.
     pub fn get_cex_extend(
         &mut self,
+        mgr: &mut SolverManager,
         model: &Model,
         start_at: Option<&mut (usize, usize)>,
     ) -> Option<Model> {
@@ -201,7 +204,7 @@ impl<T: LemmaQF> Frame<T> {
             while i.1 < self.entries[i.0].weakened.len() {
                 if let Some(models) =
                     self.fo
-                        .trans_cex(&self.conf, &hyp, &self.entries[i.0].weakened[i.1].to_term())
+                        .trans_cex(mgr, &hyp, &self.entries[i.0].weakened[i.1].to_term())
                 {
                     return Some(models.1);
                 }
@@ -217,14 +220,18 @@ impl<T: LemmaQF> Frame<T> {
     }
 
     /// Get a counter-example to induction which is an initial state.
-    pub fn get_cex_init(&mut self, start_at: Option<&mut (usize, usize)>) -> Option<Model> {
+    pub fn get_cex_init(
+        &mut self,
+        mgr: &mut SolverManager,
+        start_at: Option<&mut (usize, usize)>,
+    ) -> Option<Model> {
         let mut default_start = (0, 0);
         let i = start_at.unwrap_or(&mut default_start);
         while i.0 < self.entries.len() {
             while i.1 < self.entries[i.0].weakened.len() {
                 if let Some(model) = self
                     .fo
-                    .init_cex(&self.conf, &self.entries[i.0].weakened[i.1].to_term())
+                    .init_cex(mgr, &self.entries[i.0].weakened[i.1].to_term())
                 {
                     return Some(model);
                 }
@@ -242,6 +249,7 @@ impl<T: LemmaQF> Frame<T> {
     /// Get a counter-example to induction which is a transition from the current frame.
     pub fn get_cex_trans(
         &mut self,
+        mgr: &mut SolverManager,
         frame: &[Term],
         start_at: Option<&mut (usize, usize)>,
     ) -> Option<(Model, Model)> {
@@ -249,11 +257,10 @@ impl<T: LemmaQF> Frame<T> {
         let i = start_at.unwrap_or(&mut default_start);
         while i.0 < self.entries.len() {
             while i.1 < self.entries[i.0].weakened.len() {
-                if let Some(models) = self.fo.trans_cex(
-                    &self.conf,
-                    frame,
-                    &self.entries[i.0].weakened[i.1].to_term(),
-                ) {
+                if let Some(models) =
+                    self.fo
+                        .trans_cex(mgr, frame, &self.entries[i.0].weakened[i.1].to_term())
+                {
                     return Some(models);
                 }
 

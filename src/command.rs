@@ -1,7 +1,6 @@
 // Copyright 2022-2023 VMware, Inc.
 // SPDX-License-Identifier: BSD-2-Clause
 
-use std::rc::Rc;
 use std::{env, fs, path::PathBuf, process};
 
 use crate::{
@@ -228,7 +227,7 @@ impl App {
                 }
             }
             Command::Infer(ref args @ InferArgs { .. }) => {
-                let conf = Rc::new(args.get_solver_conf());
+                let conf = args.get_solver_conf();
                 run_fixpoint(conf, &m, args.extend_models, args.disj);
             }
             Command::Inline { .. } => {

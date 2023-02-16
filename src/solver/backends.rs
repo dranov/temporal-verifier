@@ -5,6 +5,7 @@
 use std::{
     collections::{HashMap, HashSet},
     iter::zip,
+    rc::Rc,
 };
 
 use crate::{
@@ -33,7 +34,9 @@ pub enum SolverType {
 #[derive(Debug, Clone)]
 pub struct GenericBackend {
     solver_type: SolverType,
-    cmd: SolverCmd,
+    // a backend should be cheap to clone while SolverCmd is somewhat large (due
+    // to having a bunch of options), hence this is wrapped in an Rc
+    cmd: Rc<SolverCmd>,
 }
 
 impl GenericBackend {
@@ -59,7 +62,10 @@ impl GenericBackend {
             }
         };
 
-        Self { solver_type, cmd }
+        Self {
+            solver_type,
+            cmd: Rc::new(cmd),
+        }
     }
 }
 
@@ -72,7 +78,7 @@ fn sort_cardinality(universes: &HashMap<String, usize>, sort: &Sort) -> usize {
     }
 }
 
-impl Backend for &GenericBackend {
+impl Backend for GenericBackend {
     fn get_cmd(&self) -> &SolverCmd {
         &self.cmd
     }
