@@ -54,8 +54,7 @@ fn verify_firstorder(
     assumes: &[&Term],
     assert: &Term,
 ) -> Result<(), QueryError> {
-    let mut solver =
-        Solver::new(sig, n, &conf.backend, conf.tee.as_deref()).expect("could not start solver");
+    let mut solver = conf.solver(sig, n);
     for assume in assumes {
         solver.assert(assume);
     }
