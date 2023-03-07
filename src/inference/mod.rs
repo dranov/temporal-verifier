@@ -5,5 +5,6 @@ mod basics;
 mod fixpoint;
 mod lemma;
 mod pdnf;
+mod updr;
 
 pub use fixpoint::run_fixpoint;

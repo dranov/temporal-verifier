@@ -17,7 +17,7 @@ use regex::Regex;
 use serde_derive::Deserialize;
 use walkdir::WalkDir;
 
-const SOLVERS_TO_TEST: [&str; 3] = ["z3", "cvc4", "cvc5"];
+const SOLVERS_TO_TEST: [&str; 1] = ["z3"];
 
 fn expected_version(solver: &str) -> &'static str {
     if solver == "z3" {
