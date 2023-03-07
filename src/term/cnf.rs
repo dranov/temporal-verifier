@@ -7,14 +7,13 @@
 
 // turned out to not be needed (yet)
 #![allow(dead_code)]
-use crate::fly::{
-    printer,
-    syntax::{NOp, Term, UOp},
-};
+
+use crate::fly::{printer, syntax::{NOp, Term, UOp}, syntax};
 
 use NOp::And;
-use Term::{NAryOp, UnaryOp};
+use Term::{NAryOp, UnaryOp, Literal, BinOp};
 use UOp::Always;
+use crate::fly::syntax::Term::{App, Id};
 
 /// Conjunctive normal form terms.
 ///
@@ -71,6 +70,94 @@ fn conjuncts(t: Term) -> Vec<Term> {
     }
 }
 
+fn cartesian_product(v: &[Vec<Term>]) -> Vec<Vec<Term>> {
+    if v.is_empty() {
+        return vec![vec![]];
+    }
+
+    let mut result:Vec<Vec<Term>> = vec![];
+
+    for i in &v[0] {
+        for rest in cartesian_product(&v[1..]) {
+            let mut prod = vec![i.clone()];
+            prod.extend(rest);
+            result.push(prod);
+        }
+    }
+
+    result
+}
+
+fn body_to_clauses(t: Term, is_negated: bool) -> Vec<Term> {
+    match t {
+        Literal(b) => vec![Term::Literal(b ^ !is_negated)],
+        UnaryOp(UOp::Not, t) => body_to_clauses(*t.clone(), !is_negated),
+        UnaryOp(.., _) => panic!("got UnaryOp other than Not!"),
+        BinOp(syntax::BinOp::NotEquals, lhs, rhs) =>
+            {
+                if is_negated {
+                    vec![BinOp(syntax::BinOp::Equals, lhs.clone(), rhs.clone())]
+                } else {
+                    vec![BinOp(syntax::BinOp::NotEquals, lhs.clone(), rhs.clone())]
+                }
+            },
+        BinOp(syntax::BinOp::Equals, lhs, rhs) =>
+            {
+                if !is_negated {
+                    vec![BinOp(syntax::BinOp::Equals, lhs.clone(), rhs.clone())]
+                } else {
+                    vec![BinOp(syntax::BinOp::NotEquals, lhs.clone(), rhs.clone())]
+                }
+            },
+        BinOp(syntax::BinOp::Implies, lhs, rhs) =>
+            body_to_clauses(
+                NAryOp(
+                    NOp::Or,
+                    vec![Term::negate(*lhs.clone()), *rhs.clone()],
+                ), is_negated),
+        BinOp(syntax::BinOp::Iff, lhs, rhs) =>
+            body_to_clauses(
+                NAryOp( NOp::And, vec![
+                    NAryOp(
+                        NOp::Or,
+                        vec![Term::negate(*lhs.clone()), *rhs.clone()],
+                    ),
+                    NAryOp(
+                        NOp::Or,
+                        vec![Term::negate(*rhs.clone()), *lhs.clone()],
+                    )
+                ]), is_negated),
+        NAryOp(NOp::And, terms) => {
+            if is_negated {
+                body_to_clauses(NAryOp(NOp::Or, terms.into_iter().map(|t: Term| Term::negate(t)).collect()), !is_negated)
+            } else {
+                let mut res: Vec<Term> = Vec::new();
+                for t in terms {
+                    res.extend(body_to_clauses(t, is_negated));
+                }
+                res
+            }
+        }
+        NAryOp(NOp::Or, terms) => {
+            if is_negated {
+                body_to_clauses(NAryOp(NOp::And, terms.into_iter().map(|t| Term::negate(t)).collect()), !is_negated)
+            } else {
+                let sub_formulas: Vec<Vec<Term>> = terms.into_iter().map(|t| body_to_clauses(t, false)).collect();
+                let product = cartesian_product(&sub_formulas);
+                product.into_iter().map(|ts: Vec<Term>| NAryOp(NOp::Or, ts)).collect()
+            }
+        }
+        Id(_) |  App(_, _) => {
+            if is_negated {
+                vec![Term::negate(t)]
+            } else {
+                vec![t]
+            }
+        }
+        _ => panic!("got illegal operator")
+    }
+}
+
 impl Cnf {
     pub fn new(t: Term) -> Self {
         let t = if let Some(body) = get_always(&t) {
@@ -85,8 +172,10 @@ impl Cnf {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use crate::fly::parser::parse_term;
-    use crate::fly::syntax::{NOp, Term};
+    use crate::fly::syntax::{BinOp, NOp, Term};
+    use crate::term::cnf::body_to_clauses;
 
     use super::{cnf, Cnf};
 
@@ -121,5 +210,25 @@ mod tests {
         let t = parse_term("p | q").unwrap();
         let cnf = Cnf::new(t.clone());
         assert_eq!(cnf.0, Term::NAryOp(NOp::And, vec![t]));
+    }
+
+    #[test]
+    fn test_cnf_eq() {
+        let t = parse_term("p = q").unwrap();
+        let cnf = Cnf::new(t.clone());
+        assert_eq!(cnf.0, Term::NAryOp(NOp::And, vec![parse_term("p = q").unwrap()]));
+    }
+
+    #[test]
+    fn test_body_to_clauses() {
+        let t = parse_term("(a | (b & c)) | (e & (f = g))").unwrap();
+        let terms: HashSet<_> = body_to_clauses(t, false).into_iter().collect();
+        let expected: HashSet<_> = vec![
+            parse_term("a | b | e").unwrap(),
+            parse_term("a | c | e").unwrap(),
+            parse_term("a | b | (f = g)").unwrap(),
+            parse_term("a | c | (f = g)").unwrap(),
+        ].into_iter().collect();
+        assert_eq!(terms, expected);
     }
 }
