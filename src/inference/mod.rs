@@ -8,3 +8,4 @@ mod pdnf;
 mod updr;
 
 pub use fixpoint::run_fixpoint;
+pub use updr::UPDR;

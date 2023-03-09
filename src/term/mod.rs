@@ -5,6 +5,6 @@ mod cnf;
 mod fo;
 mod prime;
 pub mod subst;
-pub use cnf::Cnf;
+pub use cnf::{Cnf, term_to_cnf_clauses};
 pub use fo::FirstOrder;
 pub use prime::Next;

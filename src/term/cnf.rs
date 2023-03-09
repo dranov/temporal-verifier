@@ -174,13 +174,13 @@ fn body_to_clauses(t: Term, is_negated: bool) -> Vec<Term> {
 }
 
 /// Convert a quantified term to separate clauses forming a cnf term
-fn term_to_cnf_clauses(t: Term) -> Vec<Term> {
+pub fn term_to_cnf_clauses(t: &Term) -> Vec<Term> {
     return match t {
         Quantified {
             quantifier: syntax::Quantifier::Forall,
             body,
             binders,
-        } => body_to_clauses(*body, false)
+        } => body_to_clauses(*body.clone(), false)
             .into_iter()
             .map(|b| Quantified {
                 quantifier: syntax::Quantifier::Forall,
@@ -188,7 +188,7 @@ fn term_to_cnf_clauses(t: Term) -> Vec<Term> {
                 binders: binders.clone(),
             })
             .collect(),
-        _ => body_to_clauses(t, false),
+        _ => body_to_clauses(t.clone(), false),
     };
 }
 
@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn test_term_to_clauses() {
         let t = parse_term("forall a:t, b:t. (a & b)").unwrap();
-        let terms: HashSet<_> = term_to_cnf_clauses(t).into_iter().collect();
+        let terms: HashSet<_> = term_to_cnf_clauses(&t).into_iter().collect();
         let expected: HashSet<_> = vec![
             parse_term("forall a:t, b:t. a").unwrap(),
             parse_term("forall a:t, b:t. b").unwrap(),

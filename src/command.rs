@@ -7,6 +7,7 @@ use std::{env, fs, path::PathBuf, process};
 use crate::{
     fly::{self, parser::parse_error_diagonistic, printer},
     inference::run_fixpoint,
+    inference::UPDR,
     solver::backends::{self, GenericBackend},
     verify::{verify_module, SolverConf},
 };
@@ -82,6 +83,7 @@ struct InferArgs {
 #[derive(clap::Subcommand, Clone, Debug, PartialEq, Eq)]
 enum Command {
     Verify(VerifyArgs),
+    UPDR_VERIFY(VerifyArgs),
     Infer(InferArgs),
     Print {
         /// File name for a .fly file
@@ -97,6 +99,7 @@ impl Command {
     fn file(&self) -> &str {
         match self {
             Command::Verify(VerifyArgs { file, .. }) => file,
+            Command::UPDR_VERIFY(VerifyArgs { file, .. }) => file,
             Command::Infer(InferArgs { file, .. }) => file,
             Command::Print { file, .. } => file,
             Command::Inline { file, .. } => file,
@@ -238,6 +241,11 @@ impl App {
                 let mut m = m;
                 m.inline_defs();
                 println!("{}", printer::fmt(&m));
+            }
+            Command::UPDR_VERIFY(ref args @ VerifyArgs { houdini, .. }) => {
+                let conf = Rc::new(args.get_solver_conf());
+                let updr = UPDR{solver_conf: conf};
+                let r = updr.search(&m);
             }
         }
     }

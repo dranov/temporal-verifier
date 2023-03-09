@@ -6,9 +6,11 @@ use crate::{
     verify::SolverConf,
     inference::basics::FOModule,
 };
+use crate::term::{Cnf, term_to_cnf_clauses};
 
 #[allow(dead_code)]
-struct Frame {
+#[derive(Debug, Clone)]
+pub struct Frame {
     terms: Vec<Term>,
 }
 
@@ -24,7 +26,8 @@ impl Frame {
 }
 
 #[allow(dead_code)]
-struct BackwardsReachableState {
+#[derive(Debug, Clone)]
+pub struct BackwardsReachableState {
     pub id: usize,
     pub term: Term,
     pub num_steps_to_bad: usize,
@@ -44,8 +47,8 @@ impl BackwardsReachableState {
 }
 
 #[allow(dead_code)]
-struct UPDR {
-    solver_conf: Rc<SolverConf>,
+pub struct UPDR {
+    pub solver_conf: Rc<SolverConf>,
     // frames: Vec<Frame>,
     // backwards_reachable_states: Vec<BackwardsReachableState>,
     // currently_blocking: BackwardsReachableState,
@@ -58,17 +61,45 @@ impl UPDR {
         UPDR { solver_conf };
     }
 
-    pub fn search(&self, module: FOModule) {
-        let mut frames: Vec<Frame> = Vec::new();
-        let mut backwards_reachable_states: Vec<BackwardsReachableState> = Vec::new();
+    pub fn find_state_to_block(
+        module: &FOModule,
+        backwards_reachable_states: &Vec<BackwardsReachableState>,
+    ) -> Option<BackwardsReachableState> {
         loop {
-            self.establish_safety(&module, &mut backwards_reachable_states);
-            self.simplify(&module, &mut frames);
-            inductive_frame: Option<Frame> = self.get_inductive_frame(&module, &frames);
-            if inductive_frame.is_some() {
-                break inductive_frame
-            }
-            frames.push(self.new_frame());
+
         }
+    }
+
+    pub fn search(&self, m: &Module) -> Option<Frame> {
+        let mut module = FOModule::new(m, false);
+        let mut backwards_reachable_states: Vec<BackwardsReachableState> = Vec::new();
+        for safety in &module.safeties {
+            for clause in term_to_cnf_clauses(safety) {
+                backwards_reachable_states.push(
+                    BackwardsReachableState {
+                        id: backwards_reachable_states.len(),
+                        term: clause,
+                        num_steps_to_bad: 0,
+                        known_absent_until_frame: 0,
+                    }
+                )
+            }
+        }
+        let mut frames: Vec<Frame> = vec![Frame{
+            terms: module.inits.clone(),
+        }];
+        println!("{}", &module.safeties[0]);
+        println!("{}", backwards_reachable_states[0].term);
+        println!("{}", frames[0].terms[0]);
+        Some(frames[0].clone())
+        // loop {
+        //     self.establish_safety(&module, &mut backwards_reachable_states);
+        //     self.simplify(&module, &mut frames);
+        //     let inductive_frame: Option<Frame> = self.get_inductive_frame(&module, &frames);
+        //     if inductive_frame.is_some() {
+        //         break inductive_frame;
+        //     }
+        //     frames.push(self.new_frame());
+        // }
     }
 }
