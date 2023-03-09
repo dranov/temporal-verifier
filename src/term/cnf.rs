@@ -13,7 +13,7 @@ use crate::fly::{
     syntax::{NOp, Term, UOp},
 };
 
-use crate::fly::syntax::Term::{App, Id};
+use crate::fly::syntax::Term::{App, Id, Quantified};
 use NOp::And;
 use Term::{BinOp, Literal, NAryOp, UnaryOp};
 use UOp::Always;
@@ -173,6 +173,25 @@ fn body_to_clauses(t: Term, is_negated: bool) -> Vec<Term> {
     }
 }
 
+/// Convert a quantified term to separate clauses forming a cnf term
+fn term_to_cnf_clauses(t: Term) -> Vec<Term> {
+    return match t {
+        Quantified {
+            quantifier: syntax::Quantifier::Forall,
+            body,
+            binders,
+        } => body_to_clauses(*body, false)
+            .into_iter()
+            .map(|b| Quantified {
+                quantifier: syntax::Quantifier::Forall,
+                body: Box::new(b),
+                binders: binders.clone(),
+            })
+            .collect(),
+        _ => body_to_clauses(t, false),
+    };
+}
+
 impl Cnf {
     pub fn new(t: Term) -> Self {
         let t = if let Some(body) = get_always(&t) {
@@ -189,7 +208,7 @@ impl Cnf {
 mod tests {
     use crate::fly::parser::parse_term;
     use crate::fly::syntax::{BinOp, NOp, Term};
-    use crate::term::cnf::body_to_clauses;
+    use crate::term::cnf::{body_to_clauses, term_to_cnf_clauses};
     use std::collections::HashSet;
 
     use super::{cnf, Cnf};
@@ -246,6 +265,19 @@ mod tests {
             parse_term("a | c | e").unwrap(),
             parse_term("a | b | (f = g)").unwrap(),
             parse_term("a | c | (f = g)").unwrap(),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(terms, expected);
+    }
+
+    #[test]
+    fn test_term_to_clauses() {
+        let t = parse_term("forall a:t, b:t. (a & b)").unwrap();
+        let terms: HashSet<_> = term_to_cnf_clauses(t).into_iter().collect();
+        let expected: HashSet<_> = vec![
+            parse_term("forall a:t, b:t. a").unwrap(),
+            parse_term("forall a:t, b:t. b").unwrap(),
         ]
         .into_iter()
         .collect();
