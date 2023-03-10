@@ -244,7 +244,7 @@ impl App {
             }
             Command::UPDR_VERIFY(ref args @ VerifyArgs { houdini, .. }) => {
                 let conf = Rc::new(args.get_solver_conf());
-                let updr = UPDR{solver_conf: conf};
+                let mut updr = UPDR::new(conf);
                 let r = updr.search(&m);
             }
         }
