@@ -134,6 +134,21 @@ impl FOModule {
         None
     }
 
+    pub fn implies(&self, conf: &SolverConf, hyp: &[Term], t: &Term) -> bool {
+        let mut solver = conf.solver(&self.signature, 2);
+        for a in hyp {
+            solver.assert(a);
+        }
+        solver.assert(&Term::negate(t.clone()));
+
+        let resp = solver.check_sat(HashMap::new()).expect("error in solver");
+        match resp {
+            SatResp::Sat => false,
+            SatResp::Unsat => true,
+            SatResp::Unknown(_) => panic!(),
+        }
+    }
+
     pub fn trans_safe_cex(&self, conf: &SolverConf, hyp: &[Term]) -> Option<Model> {
         for s in self.safeties.iter() {
             if let Some(models) = self.trans_cex(conf, hyp, s) {
