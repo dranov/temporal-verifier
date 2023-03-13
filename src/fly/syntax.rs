@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 use itertools::Itertools;
-use std::fmt;
+use std::{boxed, fmt};
 
 use serde::Serialize;
 
@@ -125,6 +125,35 @@ impl Term {
 
     pub fn negate(t: Term) -> Self {
         Self::UnaryOp(UOp::Not, Box::new(t))
+    }
+
+    pub fn negate_and_simplify(t: Term) -> Self {
+        match t {
+            Term::Literal(b) => Term::Literal(!b),
+            Term::UnaryOp(UOp::Not, t) => *t,
+            Term::UnaryOp(.., _) => panic!("got UnaryOp other than Not!"),
+            Term::BinOp(BinOp::NotEquals, lhs, rhs) => {
+                Term::BinOp(BinOp::Equals, lhs.clone(), rhs.clone())
+            }
+            Term::BinOp(BinOp::Equals, lhs, rhs) => {
+                Term::BinOp(BinOp::NotEquals, lhs.clone(), rhs.clone())
+            }
+            Term::NAryOp(NOp::Or, terms) => Term::NAryOp(
+                NOp::And,
+                terms.into_iter().map(|t| Term::negate_and_simplify(t)).collect(),
+            ),
+            Term::NAryOp(NOp::And, terms) => Term::NAryOp(
+                NOp::Or,
+                terms.into_iter().map(|t| Term::negate_and_simplify(t)).collect(),
+            ),
+            Term::Id(_) | Term::App(_, _) => Term::negate(t),
+            Term::Quantified{ quantifier: Quantifier::Forall, binders: binders, body: body} => Term::Quantified {
+                quantifier: Quantifier::Exists,
+                binders: binders,
+                body: Box::new(Term::negate_and_simplify(*body))
+            },
+            _ => panic!("got illegal operator in negate and simplify"),
+        }
     }
 
     pub fn exists<I>(binders: I, body: Term) -> Self

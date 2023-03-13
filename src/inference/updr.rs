@@ -173,11 +173,10 @@ impl UPDR {
                     id: self.backwards_reachable_states.len(),
                     term_or_model: TermOrModel::Model(predecessor),
                     known_absent_until_frame: steps_from_cex,
-                    num_steps_to_bad: 0
+                    num_steps_to_bad: 0,
                 };
                 self.backwards_reachable_states.push(bstate)
             } else {
-
             }
         }
     }
@@ -213,14 +212,25 @@ impl UPDR {
                 self.backwards_reachable_states
                     .push(BackwardsReachableState {
                         id: self.backwards_reachable_states.len(),
-                        term_or_model: TermOrModel::Term(clause),
+                        term_or_model: TermOrModel::Term(Term::negate_and_simplify(clause)),
                         num_steps_to_bad: 0,
                         known_absent_until_frame: 0,
                     })
             }
         }
         self.frames = vec![Frame {
-            terms: module.inits.clone(),
+            terms: module
+                .inits
+                .clone()
+                .into_iter()
+                .map(|t| -> Vec<Term> {
+                    match t {
+                        NAryOp(NOp::And, terms) => terms,
+                        _ => panic!("got malformed inits"),
+                    }
+                })
+                .flatten()
+                .collect(),
         }];
         // println!("{}", &module.safeties[0]);
         // println!("{}", backwards_reachable_states[0].term);
@@ -239,12 +249,16 @@ impl UPDR {
         }
     }
 
-
     fn simplify(&mut self, module: &FOModule) {
         for frame in self.frames.iter_mut() {
             let mut terms: Vec<Term> = vec![];
             for term in &frame.terms {
-                let f_minus_t: Vec<Term> = frame.terms.clone().into_iter().filter(|t| t != term).collect();
+                let f_minus_t: Vec<Term> = frame
+                    .terms
+                    .clone()
+                    .into_iter()
+                    .filter(|t| t != term)
+                    .collect();
                 if !module.implies(&self.solver_conf, &f_minus_t, term) {
                     terms.push(term.clone())
                 }
@@ -254,14 +268,17 @@ impl UPDR {
     }
 
     fn add_frame_and_push(&mut self, module: &FOModule) {
-        self.frames.push(Frame{ terms: vec![] });
-        for i in 0..(self.frames.len()-1) {
+        self.frames.push(Frame { terms: vec![] });
+        for i in 0..(self.frames.len() - 1) {
             let prev_terms = self.frames[i].terms.clone();
             for term in prev_terms.iter() {
                 if self.frames[i + 1].terms.contains(term) {
                     continue;
                 }
-                if module.trans_cex(&self.solver_conf, &prev_terms, term).is_none() {
+                if module
+                    .trans_cex(&self.solver_conf, &prev_terms, term)
+                    .is_none()
+                {
                     self.frames[i + 1].terms.push(term.clone());
                 }
             }
@@ -269,11 +286,27 @@ impl UPDR {
     }
 
     fn print_frames(&self) {
+        println!("all frames:");
         for frame in self.frames.iter() {
+            print!("[");
             for term in frame.terms.iter() {
-                print!("{},", term);
+                print!("{}, ", term);
             }
-            println!("");
+            println!("]");
+        }
+        println!("all BRS:");
+        for state in self.backwards_reachable_states.iter() {
+            print!(
+                "term:{} ",
+                match state.term_or_model.clone() {
+                    TermOrModel::Term(t) => t,
+                    TermOrModel::Model(m) => m.to_term(),
+                }
+            );
+            println!(
+                "known_absent_until_frame: {}, num_steps_to_bad : {}",
+                state.known_absent_until_frame, state.num_steps_to_bad
+            );
         }
     }
 }
