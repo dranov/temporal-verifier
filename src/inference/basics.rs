@@ -185,8 +185,8 @@ impl FOModule {
         panic!("unknown")
     }
 
-    pub fn implies(&self, conf: &SolverConf, hyp: &[Term], t: &Term) -> bool {
-        let mut solver = conf.solver(&self.signature, 2);
+    pub fn implies_cex(&self, conf: &SolverConf, hyp: &[Term], t: &Term) -> Option<Model> {
+        let mut solver = conf.solver(&self.signature, 1);
         for a in hyp {
             solver.assert(a);
         }
@@ -194,8 +194,12 @@ impl FOModule {
 
         let resp = solver.check_sat(HashMap::new()).expect("error in solver");
         match resp {
-            SatResp::Sat => false,
-            SatResp::Unsat => true,
+            SatResp::Sat => {
+                    let states = solver.get_minimal_model();
+                    assert_eq!(states.len(), 1);
+                    return Some(states[0].clone())
+                },
+            SatResp::Unsat => None,
             SatResp::Unknown(_) => panic!(),
         }
     }
@@ -204,6 +208,16 @@ impl FOModule {
         for s in self.safeties.iter() {
             if let Some(models) = self.trans_cex(conf, hyp, s) {
                 return Some(models.0);
+            }
+        }
+
+        None
+    }
+
+    pub fn safe_cex(&self, conf: &SolverConf, hyp: &[Term]) -> Option<Model> {
+        for s in self.safeties.iter() {
+            if let Some(model) = self.implies_cex(conf, hyp, s) {
+                return Some(model);
             }
         }
 
