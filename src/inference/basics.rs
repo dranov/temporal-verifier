@@ -18,6 +18,11 @@ use crate::{
     verify::SolverConf,
 };
 
+pub enum CexOrCore {
+    Cex((Model, Model)),
+    Core(HashMap<Term, bool>)
+}
+
 /// A first-order module is represented using first-order formulas,
 /// namely single-vocabulary axioms, initial assertions and safety assertions,
 /// and double-vocabulary transition assertions.
@@ -132,6 +137,52 @@ impl FOModule {
         }
 
         None
+    }
+
+    //TODO merge with trans_cex
+    pub fn trans_cex_with_core(&self, conf: &SolverConf, hyp: &[Term], t: &Term) -> CexOrCore {
+        let disj_trans = if self.disj {
+            self.transitions
+                .iter()
+                .map(|t| match t {
+                    Term::NAryOp(NOp::Or, args) => args.iter().collect_vec(),
+                    _ => vec![t],
+                })
+                .multi_cartesian_product()
+                .collect_vec()
+        } else {
+            vec![self.transitions.iter().collect_vec()]
+        };
+
+        for trans in disj_trans {
+            let mut solver = conf.solver(&self.signature, 2);
+            for a in self
+                .axioms
+                .iter()
+                .chain(self.safeties.iter())
+                .chain(hyp.iter())
+                .chain(trans.into_iter())
+            {
+                solver.assert(a);
+            }
+            for a in self.axioms.iter() {
+                solver.assert(&Next::prime(a));
+            }
+            solver.assert(&Term::negate(Next::prime(t)));
+
+            let resp = solver.check_sat(HashMap::new()).expect("error in solver");
+            match resp {
+                SatResp::Sat => {
+                    let states = solver.get_minimal_model();
+                    assert_eq!(states.len(), 2);
+
+                    return CexOrCore::Cex(states.into_iter().collect_tuple().unwrap());
+                }
+                SatResp::Unsat => return CexOrCore::Core(solver.get_unsat_core()),
+                SatResp::Unknown(_) => panic!(),
+            }
+        }
+        panic!("unknown")
     }
 
     pub fn implies(&self, conf: &SolverConf, hyp: &[Term], t: &Term) -> bool {

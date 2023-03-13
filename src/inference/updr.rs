@@ -1,5 +1,6 @@
 use crate::fly::semantics::Model;
 use crate::fly::syntax::Term::NAryOp;
+use crate::inference::basics::CexOrCore;
 use crate::term::{term_to_cnf_clauses, Cnf};
 use crate::{
     fly::syntax::*,
@@ -75,24 +76,30 @@ impl UPDR {
             if bstate_min.is_none()
                 || bstate_min.as_ref().unwrap().known_absent_until_frame == self.frames.len() - 1
             {
-                println!("break");
+                println!("break for no bstates");
                 break;
             }
             let mut found_state = bstate_min.unwrap();
             match &found_state.term_or_model {
                 TermOrModel::Term(t) => {
                     println!("m: {}", t);
-                    if module
-                        .trans_cex(&self.solver_conf, &self.frames.last().unwrap().terms, &t)
-                        .is_some()
-                    {
+                    if module.implies(
+                        &self.solver_conf,
+                        &self.frames[found_state.known_absent_until_frame + 1].terms,
+                        &t,
+                    ) {
                         return Some(found_state.id);
                     }
                 }
                 TermOrModel::Model(m) => {
                     println!("m: {}", m.to_term());
                     if m.eval(
-                        &NAryOp(NOp::And, self.frames.last().unwrap().terms.clone()),
+                        &NAryOp(
+                            NOp::And,
+                            self.frames[found_state.known_absent_until_frame + 1]
+                                .terms
+                                .clone(),
+                        ),
                         None,
                     ) != 0
                     {
@@ -154,31 +161,42 @@ impl UPDR {
             TermOrModel::Term(t) => t.clone(),
             TermOrModel::Model(m) => m.to_term(),
         };
+        println!("as term: {}", as_term);
         if frame_index == 0
             || (frame_index == 1
-                && module
-                    .trans_safe_cex(&self.solver_conf, &vec![as_term])
-                    .is_some())
+                && !module.implies(
+                    &self.solver_conf,
+                    &self.frames[0].terms,
+                    &Term::negate(as_term.clone()),
+                ))
         {
             panic!("abstract cex");
         }
-        loop {
-            if let Some((predecessor, curr)) =
-                self.get_predecessor(term_or_model, frame_index - 1, module)
-            {
-                let src = &self.backwards_reachable_states[self.currently_blocking_id.unwrap()];
-                let steps_from_cex =
-                    src.known_absent_until_frame + 1 - frame_index + src.num_steps_to_bad;
-                let bstate = BackwardsReachableState {
-                    id: self.backwards_reachable_states.len(),
-                    term_or_model: TermOrModel::Model(predecessor),
-                    known_absent_until_frame: steps_from_cex,
-                    num_steps_to_bad: 0,
-                };
-                self.backwards_reachable_states.push(bstate)
-            } else {
+        let core = loop {
+            match self.get_predecessor(term_or_model, frame_index - 1, module) {
+                CexOrCore::Cex((trans, cti)) => {
+                    let src = &self.backwards_reachable_states[self.currently_blocking_id.unwrap()];
+                    let steps_from_cex =
+                        src.known_absent_until_frame + 1 - frame_index + src.num_steps_to_bad;
+                    let bstate = BackwardsReachableState {
+                        id: self.backwards_reachable_states.len(),
+                        term_or_model: TermOrModel::Model(cti.clone()),
+                        known_absent_until_frame: steps_from_cex,
+                        num_steps_to_bad: 0,
+                    };
+                    self.backwards_reachable_states.push(bstate);
+                    trace.push(TermOrModel::Model(cti.clone()));
+                    self.block(&TermOrModel::Model(cti), frame_index - 1, trace, &module);
+                    trace.pop();
+                }
+                CexOrCore::Core(core_map) => break core_map,
             }
+        };
+        println!("CORE");
+        for (key, value) in &core {
+            println!("{}: {}", key, value);
         }
+        println!("NOCORE");
     }
 
     fn get_predecessor(
@@ -186,14 +204,14 @@ impl UPDR {
         term_or_model: &TermOrModel,
         frame_index: usize,
         module: &FOModule,
-    ) -> Option<(Model, Model)> {
+    ) -> CexOrCore {
         let as_term: Term = match term_or_model {
             TermOrModel::Term(t) => t.clone(),
             TermOrModel::Model(m) => m.to_term(),
         };
         let prev_frame = &self.frames[frame_index];
         // if let Some((prev, curr)) =
-        module.trans_cex(&self.solver_conf, &prev_frame.terms, &as_term)
+        module.trans_cex_with_core(&self.solver_conf, &prev_frame.terms, &as_term)
         //     {
         //         println!("{} {}", &prev.to_term(), &curr.to_term());
         //         panic!();
