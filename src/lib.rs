@@ -4,7 +4,7 @@
 #![allow(clippy::needless_return)]
 
 mod command;
-mod fly;
+pub mod fly;
 mod inference;
 pub mod smtlib;
 pub mod solver;
