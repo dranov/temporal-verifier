@@ -274,7 +274,7 @@ impl App {
                 m.inline_defs();
                 println!("{}", printer::fmt(&m));
             }
-            Command::UPDR_VERIFY(ref args @ VerifyArgs { houdini, .. }) => {
+            Command::UPDR_VERIFY(ref args @ VerifyArgs {  .. }) => {
                 let conf = Rc::new(args.get_solver_conf());
                 let mut updr = UPDR::new(conf);
                 let r = updr.search(&m);

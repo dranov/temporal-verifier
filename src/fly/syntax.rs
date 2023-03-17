@@ -149,7 +149,7 @@ impl Term {
                 NOp::Or,
                 terms.into_iter().map(|t| Term::negate_and_simplify(t)).collect(),
             ),
-            Term::Id(_) | Term::App(_, _) => Term::negate(t),
+            Term::Id(_) | Term::App(_, _, _) => Term::negate(t),
             Term::Quantified{ quantifier: Quantifier::Forall, binders: binders, body: body} => Term::Quantified {
                 quantifier: Quantifier::Exists,
                 binders: binders,

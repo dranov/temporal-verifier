@@ -162,7 +162,7 @@ fn body_to_clauses(t: Term, is_negated: bool) -> Vec<Term> {
                     .collect()
             }
         }
-        Id(_) | App(_, _) => {
+        Id(_) | App(_, _, _) => {
             if is_negated {
                 vec![Term::negate(t)]
             } else {
@@ -245,23 +245,23 @@ mod tests {
 
     #[test]
     fn test_cnf_eq() {
-        let t = parse_term("p = q").unwrap();
+        let t = term("p = q");
         let cnf = Cnf::new(t.clone());
         assert_eq!(
             cnf.0,
-            Term::NAryOp(NOp::And, vec![parse_term("p = q").unwrap()])
+            Term::NAryOp(NOp::And, vec![term("p = q")])
         );
     }
 
     #[test]
     fn test_body_to_clauses() {
-        let t = parse_term("(a | (b & c)) | (e & (f = g))").unwrap();
+        let t = term("(a | (b & c)) | (e & (f = g))");
         let terms: HashSet<_> = body_to_clauses(t, false).into_iter().collect();
         let expected: HashSet<_> = vec![
-            parse_term("a | b | e").unwrap(),
-            parse_term("a | c | e").unwrap(),
-            parse_term("a | b | (f = g)").unwrap(),
-            parse_term("a | c | (f = g)").unwrap(),
+            term("a | b | e"),
+            term("a | c | e"),
+            term("a | b | (f = g)"),
+            term("a | c | (f = g)"),
         ]
         .into_iter()
         .collect();
@@ -270,11 +270,11 @@ mod tests {
 
     #[test]
     fn test_term_to_clauses() {
-        let t = parse_term("forall a:t, b:t. (a & b)").unwrap();
+        let t = term("forall a:t, b:t. (a & b)");
         let terms: HashSet<_> = term_to_cnf_clauses(&t).into_iter().collect();
         let expected: HashSet<_> = vec![
-            parse_term("forall a:t, b:t. a").unwrap(),
-            parse_term("forall a:t, b:t. b").unwrap(),
+            term("forall a:t, b:t. a"),
+            term("forall a:t, b:t. b"),
         ]
         .into_iter()
         .collect();
