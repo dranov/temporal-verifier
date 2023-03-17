@@ -83,11 +83,14 @@ impl UPDR {
             match &found_state.term_or_model {
                 TermOrModel::Term(t) => {
                     println!("m: {}", t);
-                    if module.implies_cex(
-                        &self.solver_conf,
-                        &self.frames[found_state.known_absent_until_frame + 1].terms,
-                        &Term::negate(t.clone()),
-                    ).is_some() {
+                    if module
+                        .implies_cex(
+                            &self.solver_conf,
+                            &self.frames[found_state.known_absent_until_frame + 1].terms,
+                            &Term::negate(t.clone()),
+                        )
+                        .is_some()
+                    {
                         return Some(found_state.id);
                     }
                 }
@@ -116,7 +119,7 @@ impl UPDR {
         let last_frame = self.frames.last().unwrap();
         println!("last_frame.terms {}", &last_frame.terms[0]);
         let counter_example = module.safe_cex(&self.solver_conf, &last_frame.terms);
-        if  module.safeties.len() == 0 || counter_example.is_none() {
+        if module.safeties.len() == 0 || counter_example.is_none() {
             println!("None");
             // Nothing to block.
             return None;
@@ -162,14 +165,16 @@ impl UPDR {
             TermOrModel::Term(t) => t.clone(),
             TermOrModel::Model(m) => m.to_term(),
         };
-        println!("as term: {}", as_term);
+        println!("blocking as term: {} at index {}", as_term, frame_index);
         if frame_index == 0
             || (frame_index == 1
-                && !module.implies_cex(
-                    &self.solver_conf,
-                    &self.frames[0].terms,
-                    &Term::negate(as_term.clone()),
-                ).is_none())
+                && !module
+                    .implies_cex(
+                        &self.solver_conf,
+                        &self.frames[0].terms,
+                        &Term::negate(as_term.clone()),
+                    )
+                    .is_none())
         {
             panic!("abstract cex");
         }
@@ -203,7 +208,29 @@ impl UPDR {
         for (key, value) in &core {
             println!("{}: {}", key, value);
         }
-        println!("NOCORE");
+        println!("END CORE");
+
+        for i in 0..(frame_index + 1) {
+            self.frames[i].strengthen(as_term.clone());
+        }
+        'push_frames: for i in frame_index..(self.frames.len() - 1) {
+            let prev_terms = self.frames[i].terms.clone();
+            for term in prev_terms.iter() {
+                if self.frames[i + 1].terms.contains(term) {
+                    continue;
+                }
+                if module
+                    .trans_cex(&self.solver_conf, &prev_terms, term)
+                    .is_none()
+                {
+                    self.frames[i + 1].terms.push(term.clone());
+                } else {
+                    break 'push_frames;
+                }
+            }
+        }
+        println!("frames in block:");
+        self.print_frames();
     }
 
     fn get_predecessor(
@@ -219,12 +246,12 @@ impl UPDR {
         println!("pred for {}", as_term);
         let prev_frame = &self.frames[frame_index];
         // if let Some((prev, curr)) =
-        let res = module.trans_cex_with_core(&self.solver_conf, &prev_frame.terms, &as_term);
+        let res = module.get_pred(&self.solver_conf, &prev_frame.terms, &as_term);
         match &res {
-            CexOrCore::Cex((m1,m2)) => {
+            CexOrCore::Cex((m1, m2)) => {
                 println!("m,m for {}, {}", m1.to_term(), m2.to_term());
-            },
-            CexOrCore::Core(_) => ()
+            }
+            CexOrCore::Core(_) => (),
         };
         res
         //     {
@@ -292,7 +319,10 @@ impl UPDR {
                     .into_iter()
                     .filter(|t| t != term)
                     .collect();
-                if !module.implies_cex(&self.solver_conf, &f_minus_t, term).is_none() {
+                if !module
+                    .implies_cex(&self.solver_conf, &f_minus_t, term)
+                    .is_none()
+                {
                     terms.push(term.clone())
                 }
             }

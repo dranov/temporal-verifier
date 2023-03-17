@@ -20,7 +20,7 @@ use crate::{
 
 pub enum CexOrCore {
     Cex((Model, Model)),
-    Core(HashMap<Term, bool>)
+    Core(HashMap<Term, bool>),
 }
 
 /// A first-order module is represented using first-order formulas,
@@ -139,8 +139,7 @@ impl FOModule {
         None
     }
 
-    //TODO merge with trans_cex
-    pub fn trans_cex_with_core(&self, conf: &SolverConf, hyp: &[Term], t: &Term) -> CexOrCore {
+    pub fn get_pred(&self, conf: &SolverConf, hyp: &[Term], t: &Term) -> CexOrCore {
         let disj_trans = if self.disj {
             self.transitions
                 .iter()
@@ -159,7 +158,6 @@ impl FOModule {
             for a in self
                 .axioms
                 .iter()
-                .chain(self.safeties.iter())
                 .chain(hyp.iter())
                 .chain(trans.into_iter())
             {
@@ -168,7 +166,7 @@ impl FOModule {
             for a in self.axioms.iter() {
                 solver.assert(&Next::prime(a));
             }
-            solver.assert(&Term::negate(Next::prime(t)));
+            solver.assert(&Next::prime(t));
 
             let resp = solver.check_sat(HashMap::new()).expect("error in solver");
             match resp {
@@ -195,10 +193,10 @@ impl FOModule {
         let resp = solver.check_sat(HashMap::new()).expect("error in solver");
         match resp {
             SatResp::Sat => {
-                    let states = solver.get_minimal_model();
-                    assert_eq!(states.len(), 1);
-                    return Some(states[0].clone())
-                },
+                let states = solver.get_minimal_model();
+                assert_eq!(states.len(), 1);
+                return Some(states[0].clone());
+            }
             SatResp::Unsat => None,
             SatResp::Unknown(_) => panic!(),
         }
