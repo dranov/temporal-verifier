@@ -91,6 +91,7 @@ impl UPDR {
                         )
                         .is_some()
                     {
+                        println!("returning for term implies");
                         return Some(found_state.id);
                     }
                 }
@@ -106,6 +107,7 @@ impl UPDR {
                         None,
                     ) != 0
                     {
+                        println!("returning for model eval");
                         return Some(found_state.id);
                     }
                 }
@@ -168,13 +170,13 @@ impl UPDR {
         println!("blocking as term: {} at index {}", as_term, frame_index);
         if frame_index == 0
             || (frame_index == 1
-                && !module
-                    .implies_cex(
-                        &self.solver_conf,
-                        &self.frames[0].terms,
-                        &Term::negate(as_term.clone()),
-                    )
-                    .is_none())
+            && !module
+            .implies_cex(
+                &self.solver_conf,
+                &self.frames[0].terms,
+                &Term::negate(as_term.clone()),
+            )
+            .is_none())
         {
             panic!("abstract cex");
         }
@@ -209,24 +211,25 @@ impl UPDR {
             println!("{}: {}", key, value);
         }
         println!("END CORE");
-
+        let negated = Term::negate(as_term);
         for i in 0..(frame_index + 1) {
-            self.frames[i].strengthen(as_term.clone());
+            if self.frames[i].terms.contains(&negated) {
+                continue;
+            }
+            self.frames[i].strengthen(negated.clone());
         }
         'push_frames: for i in frame_index..(self.frames.len() - 1) {
             let prev_terms = self.frames[i].terms.clone();
-            for term in prev_terms.iter() {
-                if self.frames[i + 1].terms.contains(term) {
-                    continue;
-                }
-                if module
-                    .trans_cex(&self.solver_conf, &prev_terms, term)
-                    .is_none()
-                {
-                    self.frames[i + 1].terms.push(term.clone());
-                } else {
-                    break 'push_frames;
-                }
+            if self.frames[i + 1].terms.contains(&negated) {
+                continue;
+            }
+            if module
+                .trans_cex(&self.solver_conf, &prev_terms, &negated)
+                .is_none()
+            {
+                self.frames[i + 1].terms.push(negated.clone());
+            } else {
+                break 'push_frames;
             }
         }
         println!("frames in block:");
@@ -297,13 +300,16 @@ impl UPDR {
         // println!("{}", frames[0].terms[0]);
         // Some(frames[0].clone())
         loop {
+            println!("establish_safety");
             self.establish_safety(&module);
             self.print_frames();
+            println!("simplify");
             self.simplify(&module);
             // let inductive_frame: Option<Frame> = self.get_inductive_frame(&module);
             // if inductive_frame.is_some() {
             //     break inductive_frame;
             // }
+            println!("add_frame_and_push");
             self.add_frame_and_push(&module);
             self.print_frames();
         }
