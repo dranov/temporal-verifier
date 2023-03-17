@@ -19,7 +19,7 @@ use crate::{
 };
 
 pub enum CexOrCore {
-    Cex((Model, Model)),
+    Cex((Term, Model)),
     Core(HashMap<Term, bool>),
 }
 
@@ -140,6 +140,12 @@ impl FOModule {
     }
 
     pub fn get_pred(&self, conf: &SolverConf, hyp: &[Term], t: &Term) -> CexOrCore {
+        println!("predding");
+        for h in hyp {
+            print!(" h: {}", h);
+        }
+        println!();
+        println!(" t: {}", t);
         let disj_trans = if self.disj {
             self.transitions
                 .iter()
@@ -158,8 +164,9 @@ impl FOModule {
             for a in self
                 .axioms
                 .iter()
+                .chain(self.safeties.iter())
                 .chain(hyp.iter())
-                .chain(trans.into_iter())
+                .chain(trans.clone().into_iter())
             {
                 solver.assert(a);
             }
@@ -173,8 +180,9 @@ impl FOModule {
                 SatResp::Sat => {
                     let states = solver.get_minimal_model();
                     assert_eq!(states.len(), 2);
-
-                    return CexOrCore::Cex(states.into_iter().collect_tuple().unwrap());
+                    assert_eq!(trans.len(), 1, "only non-disj supported");
+                    println!("states: {}\n{}", &states[0].fmt(), &states[1].fmt());
+                    return CexOrCore::Cex((trans[0].clone(), states[0].clone()));
                 }
                 SatResp::Unsat => return CexOrCore::Core(solver.get_unsat_core()),
                 SatResp::Unknown(_) => panic!(),

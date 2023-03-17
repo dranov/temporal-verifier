@@ -146,7 +146,7 @@ impl UPDR {
             println!("got ID: {}", &state_index);
             self.currently_blocking_id = Some(state_index.clone());
             let bstate = &self.backwards_reachable_states[state_index];
-            let mut trace: Vec<TermOrModel> = vec![];
+            let mut trace: Vec<(Term, TermOrModel)> = vec![];
             self.block(
                 &bstate.term_or_model.clone(),
                 &bstate.known_absent_until_frame + 1,
@@ -160,7 +160,7 @@ impl UPDR {
         &mut self,
         term_or_model: &TermOrModel,
         frame_index: usize,
-        trace: &mut Vec<TermOrModel>,
+        trace: &mut Vec<(Term, TermOrModel)>,
         module: &FOModule,
     ) {
         let as_term: Term = match term_or_model {
@@ -170,37 +170,37 @@ impl UPDR {
         println!("blocking as term: {} at index {}", as_term, frame_index);
         if frame_index == 0
             || (frame_index == 1
-            && !module
-            .implies_cex(
-                &self.solver_conf,
-                &self.frames[0].terms,
-                &Term::negate(as_term.clone()),
-            )
-            .is_none())
+                && !module
+                    .implies_cex(
+                        &self.solver_conf,
+                        &self.frames[0].terms,
+                        &Term::negate(as_term.clone()),
+                    )
+                    .is_none())
         {
             panic!("abstract cex");
         }
         let core = loop {
             match self.get_predecessor(term_or_model, frame_index - 1, module) {
-                CexOrCore::Cex((trans, cti)) => {
+                CexOrCore::Cex((trans, pred)) => {
                     let src = &self.backwards_reachable_states[self.currently_blocking_id.unwrap()];
                     let steps_from_cex =
                         src.known_absent_until_frame + 1 - frame_index + src.num_steps_to_bad;
                     let bstate = BackwardsReachableState {
                         id: self.backwards_reachable_states.len(),
-                        term_or_model: TermOrModel::Model(cti.clone()),
+                        term_or_model: TermOrModel::Model(pred.clone()),
                         known_absent_until_frame: steps_from_cex,
                         num_steps_to_bad: 0,
                     };
                     if let TermOrModel::Model(m) = bstate.term_or_model.clone() {
-                        println!("managed to reach {}", &m.to_term());
+                        println!("managed to reach {}", m.fmt());
                     }
                     if let TermOrModel::Term(t) = bstate.term_or_model.clone() {
                         println!("managed to reach {}", &t);
                     }
                     self.backwards_reachable_states.push(bstate);
-                    trace.push(TermOrModel::Model(cti.clone()));
-                    self.block(&TermOrModel::Model(cti), frame_index - 1, trace, &module);
+                    trace.push((trans.clone(), TermOrModel::Model(pred.clone())));
+                    self.block(&TermOrModel::Model(pred), frame_index - 1, trace, &module);
                     trace.pop();
                 }
                 CexOrCore::Core(core_map) => break core_map,
@@ -251,8 +251,8 @@ impl UPDR {
         // if let Some((prev, curr)) =
         let res = module.get_pred(&self.solver_conf, &prev_frame.terms, &as_term);
         match &res {
-            CexOrCore::Cex((m1, m2)) => {
-                println!("m,m for {}, {}", m1.to_term(), m2.to_term());
+            CexOrCore::Cex((trans, pred)) => {
+                println!("trans, pred for {}, {}", trans, pred.fmt());
             }
             CexOrCore::Core(_) => (),
         };
@@ -366,7 +366,7 @@ impl UPDR {
         println!("all BRS:");
         for state in self.backwards_reachable_states.iter() {
             print!(
-                "term:{} ",
+                "term: {} ",
                 match state.term_or_model.clone() {
                     TermOrModel::Term(t) => t,
                     TermOrModel::Model(m) => m.to_term(),
