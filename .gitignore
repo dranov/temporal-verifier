@@ -1,10 +1,9 @@
-# Files to ignore
-
 *~
 /pegviz.html
 *.smt2
-
+/solvers/
+# coverage report
+lcov.info
 
 # Added by cargo
-
 /target

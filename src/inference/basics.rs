@@ -132,7 +132,7 @@ impl FOModule {
                     return Some(states.into_iter().collect_tuple().unwrap());
                 }
                 SatResp::Unsat => (),
-                SatResp::Unknown(_) => panic!(),
+                SatResp::Unknown(reason) => panic!("sat solver returned unknown: {reason}"),
             }
         }
 
@@ -486,9 +486,9 @@ pub fn input_cfg(sig: &Signature) -> (QuantifierConfig, usize, Option<usize>) {
             _ => panic!("Invalid quantifier entered."),
         });
 
-        let sort = Sort::Id(parts.next().unwrap().to_string());
-        if sig.sorts.contains(&sort) {
-            sorts.push(sort);
+        let sort_id = parts.next().unwrap().to_string();
+        if sig.sorts.contains(&sort_id) {
+            sorts.push(Sort::Id(sort_id));
         } else {
             panic!("Invalid sort entered.");
         }

@@ -12,6 +12,10 @@ pub enum UOp {
     Prime,
     Always,
     Eventually,
+    /// Used for the l2s construction (may end up replaced with just Prime)
+    Next,
+    /// Past operator, used only for the l2s construction
+    Previously,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
@@ -20,6 +24,10 @@ pub enum BinOp {
     NotEquals,
     Implies,
     Iff,
+    /// Used for the l2s construction
+    Until,
+    /// Past operator, used only for the l2s construction
+    Since,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
@@ -37,22 +45,17 @@ pub enum Quantifier {
 #[derive(PartialEq, Eq, Clone, Debug, Hash)]
 pub struct Binder {
     pub name: String,
-    // ODED: I would rename typ to sort, here and elsewhere
-    // ODED: not sure if we should have Option here until we have type inference
-    pub typ: Option<Sort>,
+    pub sort: Sort,
 }
 
-// ODED: maybe Term should be Copy? (see test_eval in semantics.rs)
 #[derive(PartialEq, Eq, Clone, Debug, Hash)]
 pub enum Term {
     Literal(bool),
     Id(String),
-    // ODED: I think we should have App(String, Vec<Term>), since we're not high-order (yet)
-    App(Box<Term>, Vec<Term>),
+    App(String, usize, Vec<Term>),
     UnaryOp(UOp, Box<Term>),
     BinOp(BinOp, Box<Term>, Box<Term>),
     NAryOp(NOp, Vec<Term>),
-    #[allow(dead_code)]
     Ite {
         cond: Box<Term>,
         then: Box<Term>,
@@ -191,15 +194,6 @@ impl Sort {
     pub fn new<S: AsRef<str>>(s: S) -> Self {
         Self::Id(s.as_ref().to_string())
     }
-
-    /// Get the name of this sort if it's a user-declared sort, or None for the
-    /// built-in Bool.
-    pub fn id(&self) -> Option<&str> {
-        match self {
-            Sort::Bool => None,
-            Sort::Id(s) => Some(s),
-        }
-    }
 }
 
 impl fmt::Display for Sort {
@@ -219,22 +213,25 @@ pub struct RelationDecl {
     pub mutable: bool,
     pub name: String,
     pub args: Vec<Sort>,
-    pub typ: Sort,
+    pub sort: Sort,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize)]
 pub struct Signature {
-    /// sorts shouldn't contain Bool, it should contain only uninterpreted sorts
-    pub sorts: Vec<Sort>,
+    pub sorts: Vec<String>, // only contains uninterpreted sorts
     pub relations: Vec<RelationDecl>,
 }
 
 impl Signature {
     pub fn sort_idx(&self, sort: &Sort) -> usize {
-        self.sorts
-            .iter()
-            .position(|x| x == sort)
-            .unwrap_or_else(|| panic!("invalid sort {sort}"))
+        match sort {
+            Sort::Bool => panic!("invalid sort {sort}"),
+            Sort::Id(sort) => self
+                .sorts
+                .iter()
+                .position(|x| x == sort)
+                .unwrap_or_else(|| panic!("invalid sort {sort}")),
+        }
     }
 
     /// Get the declaration for a given name.
@@ -253,6 +250,11 @@ impl Signature {
             .iter()
             .position(|x| x.name == name)
             .unwrap_or_else(|| panic!("invalid relation {name}"))
+    }
+
+    pub fn contains_name(&self, name: &str) -> bool {
+        let symbol_no_primes = name.trim_end_matches(|c| c == '\'');
+        return self.relations.iter().any(|r| r.name == symbol_no_primes);
     }
 
     /// Compute all terms up to a certain nesting depth (optional), using the given variable names.
@@ -285,7 +287,7 @@ impl Signature {
         // Generate constants.
         for rel_decl in &self.relations {
             if rel_decl.args.is_empty() {
-                new_terms[sort_idx(&rel_decl.typ)].push(Term::Id(rel_decl.name.clone()));
+                new_terms[sort_idx(&rel_decl.sort)].push(Term::Id(rel_decl.name.clone()));
             }
         }
 
@@ -327,8 +329,9 @@ impl Signature {
                             .multi_cartesian_product()
                         {
                             let term_vec = args.iter().map(|&x| x.clone()).collect();
-                            new_new_terms[sort_idx(&rel_decl.typ)].push(Term::App(
-                                Box::new(Term::Id(rel_decl.name.clone())),
+                            new_new_terms[sort_idx(&rel_decl.sort)].push(Term::App(
+                                rel_decl.name.clone(),
+                                0,
                                 term_vec,
                             ));
                         }
@@ -375,7 +378,7 @@ impl Signature {
 pub struct Definition {
     pub name: String,
     pub binders: Vec<Binder>,
-    pub ret_typ: Sort,
+    pub ret_sort: Sort,
     pub body: Term,
 }
 
@@ -416,44 +419,44 @@ mod tests {
     use std::vec;
 
     use super::{RelationDecl, Signature, Sort};
-    use crate::fly::parser::parse_term;
+    use crate::fly::parser::term;
 
     #[test]
     fn test_terms_by_sort() {
-        let typ = |n: usize| Sort::Id(format!("T{n}"));
+        let sort = |n: usize| Sort::Id(format!("T{n}"));
 
         let mut sig = Signature {
-            sorts: vec![typ(1), typ(2)],
+            sorts: vec!["T1".to_string(), "T2".to_string()],
             relations: vec![
                 RelationDecl {
                     mutable: true,
                     name: "c1".to_string(),
                     args: vec![],
-                    typ: typ(1),
+                    sort: sort(1),
                 },
                 RelationDecl {
                     mutable: true,
                     name: "c2".to_string(),
                     args: vec![],
-                    typ: typ(2),
+                    sort: sort(2),
                 },
                 RelationDecl {
                     mutable: true,
                     name: "f12".to_string(),
-                    args: vec![typ(1)],
-                    typ: typ(2),
+                    args: vec![sort(1)],
+                    sort: sort(2),
                 },
                 RelationDecl {
                     mutable: true,
                     name: "f21".to_string(),
-                    args: vec![typ(2)],
-                    typ: typ(1),
+                    args: vec![sort(2)],
+                    sort: sort(1),
                 },
                 RelationDecl {
                     mutable: true,
                     name: "r".to_string(),
-                    args: vec![typ(2), typ(1)],
-                    typ: Sort::Bool,
+                    args: vec![sort(2), sort(1)],
+                    sort: Sort::Bool,
                 },
             ],
         };
@@ -467,21 +470,9 @@ mod tests {
         assert_eq!(
             terms,
             vec![
-                vec![
-                    parse_term("a1").expect("parser error"),
-                    parse_term("a2").expect("parser error"),
-                    parse_term("c1").expect("parser error"),
-                ],
-                vec![
-                    parse_term("b").expect("parser error"),
-                    parse_term("c2").expect("parser error"),
-                ],
-                vec![
-                    parse_term("a1=a2").expect("parser error"),
-                    parse_term("a1=c1").expect("parser error"),
-                    parse_term("a2=c1").expect("parser error"),
-                    parse_term("b=c2").expect("parser error"),
-                ]
+                vec![term("a1"), term("a2"), term("c1"),],
+                vec![term("b"), term("c2"),],
+                vec![term("a1=a2"), term("a1=c1"), term("a2=c1"), term("b=c2"),]
             ]
         );
 
@@ -490,80 +481,80 @@ mod tests {
             terms,
             vec![
                 vec![
-                    parse_term("a1").expect("parser error"),
-                    parse_term("a2").expect("parser error"),
-                    parse_term("c1").expect("parser error"),
-                    parse_term("f21(b)").expect("parser error"),
-                    parse_term("f21(c2)").expect("parser error"),
-                    parse_term("f21(f12(a1))").expect("parser error"),
-                    parse_term("f21(f12(a2))").expect("parser error"),
-                    parse_term("f21(f12(c1))").expect("parser error"),
+                    term("a1"),
+                    term("a2"),
+                    term("c1"),
+                    term("f21(b)"),
+                    term("f21(c2)"),
+                    term("f21(f12(a1))"),
+                    term("f21(f12(a2))"),
+                    term("f21(f12(c1))"),
                 ],
                 vec![
-                    parse_term("b").expect("parser error"),
-                    parse_term("c2").expect("parser error"),
-                    parse_term("f12(a1)").expect("parser error"),
-                    parse_term("f12(a2)").expect("parser error"),
-                    parse_term("f12(c1)").expect("parser error"),
-                    parse_term("f12(f21(b))").expect("parser error"),
-                    parse_term("f12(f21(c2))").expect("parser error"),
+                    term("b"),
+                    term("c2"),
+                    term("f12(a1)"),
+                    term("f12(a2)"),
+                    term("f12(c1)"),
+                    term("f12(f21(b))"),
+                    term("f12(f21(c2))"),
                 ],
                 vec![
-                    parse_term("r(b, a1)").expect("parser error"),
-                    parse_term("r(b, a2)").expect("parser error"),
-                    parse_term("r(b, c1)").expect("parser error"),
-                    parse_term("r(c2, a1)").expect("parser error"),
-                    parse_term("r(c2, a2)").expect("parser error"),
-                    parse_term("r(c2, c1)").expect("parser error"),
-                    parse_term("r(b, f21(b))").expect("parser error"),
-                    parse_term("r(b, f21(c2))").expect("parser error"),
-                    parse_term("r(c2, f21(b))").expect("parser error"),
-                    parse_term("r(c2, f21(c2))").expect("parser error"),
-                    parse_term("r(f12(a1), a1)").expect("parser error"),
-                    parse_term("r(f12(a1), a2)").expect("parser error"),
-                    parse_term("r(f12(a1), c1)").expect("parser error"),
-                    parse_term("r(f12(a2), a1)").expect("parser error"),
-                    parse_term("r(f12(a2), a2)").expect("parser error"),
-                    parse_term("r(f12(a2), c1)").expect("parser error"),
-                    parse_term("r(f12(c1), a1)").expect("parser error"),
-                    parse_term("r(f12(c1), a2)").expect("parser error"),
-                    parse_term("r(f12(c1), c1)").expect("parser error"),
-                    parse_term("r(f12(a1), f21(b))").expect("parser error"),
-                    parse_term("r(f12(a1), f21(c2))").expect("parser error"),
-                    parse_term("r(f12(a2), f21(b))").expect("parser error"),
-                    parse_term("r(f12(a2), f21(c2))").expect("parser error"),
-                    parse_term("r(f12(c1), f21(b))").expect("parser error"),
-                    parse_term("r(f12(c1), f21(c2))").expect("parser error"),
+                    term("r(b, a1)"),
+                    term("r(b, a2)"),
+                    term("r(b, c1)"),
+                    term("r(c2, a1)"),
+                    term("r(c2, a2)"),
+                    term("r(c2, c1)"),
+                    term("r(b, f21(b))"),
+                    term("r(b, f21(c2))"),
+                    term("r(c2, f21(b))"),
+                    term("r(c2, f21(c2))"),
+                    term("r(f12(a1), a1)"),
+                    term("r(f12(a1), a2)"),
+                    term("r(f12(a1), c1)"),
+                    term("r(f12(a2), a1)"),
+                    term("r(f12(a2), a2)"),
+                    term("r(f12(a2), c1)"),
+                    term("r(f12(c1), a1)"),
+                    term("r(f12(c1), a2)"),
+                    term("r(f12(c1), c1)"),
+                    term("r(f12(a1), f21(b))"),
+                    term("r(f12(a1), f21(c2))"),
+                    term("r(f12(a2), f21(b))"),
+                    term("r(f12(a2), f21(c2))"),
+                    term("r(f12(c1), f21(b))"),
+                    term("r(f12(c1), f21(c2))"),
                 ]
             ]
         );
 
         sig = Signature {
-            sorts: vec![typ(1), typ(2)],
+            sorts: vec!["T1".to_string(), "T2".to_string()],
             relations: vec![
                 RelationDecl {
                     mutable: true,
                     name: "c1".to_string(),
                     args: vec![],
-                    typ: typ(1),
+                    sort: sort(1),
                 },
                 RelationDecl {
                     mutable: true,
                     name: "c2".to_string(),
                     args: vec![],
-                    typ: typ(2),
+                    sort: sort(2),
                 },
                 RelationDecl {
                     mutable: true,
                     name: "f12".to_string(),
-                    args: vec![typ(1)],
-                    typ: typ(2),
+                    args: vec![sort(1)],
+                    sort: sort(2),
                 },
                 RelationDecl {
                     mutable: true,
                     name: "r".to_string(),
-                    args: vec![typ(2), typ(1)],
-                    typ: Sort::Bool,
+                    args: vec![sort(2), sort(1)],
+                    sort: Sort::Bool,
                 },
             ],
         };
@@ -572,34 +563,30 @@ mod tests {
         assert_eq!(
             terms,
             vec![
+                vec![term("a1"), term("a2"), term("c1"),],
                 vec![
-                    parse_term("a1").expect("parser error"),
-                    parse_term("a2").expect("parser error"),
-                    parse_term("c1").expect("parser error"),
+                    term("b"),
+                    term("c2"),
+                    term("f12(a1)"),
+                    term("f12(a2)"),
+                    term("f12(c1)"),
                 ],
                 vec![
-                    parse_term("b").expect("parser error"),
-                    parse_term("c2").expect("parser error"),
-                    parse_term("f12(a1)").expect("parser error"),
-                    parse_term("f12(a2)").expect("parser error"),
-                    parse_term("f12(c1)").expect("parser error"),
-                ],
-                vec![
-                    parse_term("r(b, a1)").expect("parser error"),
-                    parse_term("r(b, a2)").expect("parser error"),
-                    parse_term("r(b, c1)").expect("parser error"),
-                    parse_term("r(c2, a1)").expect("parser error"),
-                    parse_term("r(c2, a2)").expect("parser error"),
-                    parse_term("r(c2, c1)").expect("parser error"),
-                    parse_term("r(f12(a1), a1)").expect("parser error"),
-                    parse_term("r(f12(a1), a2)").expect("parser error"),
-                    parse_term("r(f12(a1), c1)").expect("parser error"),
-                    parse_term("r(f12(a2), a1)").expect("parser error"),
-                    parse_term("r(f12(a2), a2)").expect("parser error"),
-                    parse_term("r(f12(a2), c1)").expect("parser error"),
-                    parse_term("r(f12(c1), a1)").expect("parser error"),
-                    parse_term("r(f12(c1), a2)").expect("parser error"),
-                    parse_term("r(f12(c1), c1)").expect("parser error"),
+                    term("r(b, a1)"),
+                    term("r(b, a2)"),
+                    term("r(b, c1)"),
+                    term("r(c2, a1)"),
+                    term("r(c2, a2)"),
+                    term("r(c2, c1)"),
+                    term("r(f12(a1), a1)"),
+                    term("r(f12(a1), a2)"),
+                    term("r(f12(a1), c1)"),
+                    term("r(f12(a2), a1)"),
+                    term("r(f12(a2), a2)"),
+                    term("r(f12(a2), c1)"),
+                    term("r(f12(c1), a1)"),
+                    term("r(f12(c1), a2)"),
+                    term("r(f12(c1), c1)"),
                 ]
             ]
         );

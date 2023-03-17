@@ -12,10 +12,7 @@ pub fn sort(s: &Sort) -> Sexp {
 }
 
 fn binder(b: &Binder) -> Sexp {
-    match &b.typ {
-        None => panic!("unexpected binder without sort"),
-        Some(t) => app(&b.name, vec![sort(t)]),
-    }
+    app(&b.name, vec![sort(&b.sort)])
 }
 
 fn term_primes(t: &Term, num_primes: usize) -> Sexp {
@@ -31,8 +28,8 @@ fn term_primes(t: &Term, num_primes: usize) -> Sexp {
         Term::Literal(false) => atom_s("false"),
         Term::Literal(true) => atom_s("true"),
         Term::Id(s) => atom_s(format!("{s}{}", "'".repeat(num_primes))),
-        Term::App(f, args) => {
-            let head = vec![term(f)].into_iter();
+        Term::App(f, p, args) => {
+            let head = vec![term_primes(&Term::Id(f.clone()), p + num_primes)].into_iter();
             let args = args.iter().map(term);
             sexp_l(head.chain(args))
         }
@@ -48,7 +45,7 @@ fn term_primes(t: &Term, num_primes: usize) -> Sexp {
                     term_primes(arg, num_primes + 1)
                 }
                 // TODO: temporal stuff should be eliminated before here
-                UOp::Always | UOp::Eventually => {
+                UOp::Always | UOp::Eventually | UOp::Next | UOp::Previously => {
                     panic!("attempt to encode a temporal formula for smt")
                 }
             }
@@ -60,6 +57,9 @@ fn term_primes(t: &Term, num_primes: usize) -> Sexp {
                 BinOp::NotEquals => app("distinct", args),
                 BinOp::Implies => app("=>", args),
                 BinOp::Iff => app("=", args),
+                BinOp::Until | BinOp::Since => {
+                    panic!("attempt to encode a temporal formula for smt")
+                }
             }
         }
         Term::NAryOp(op, args) => {

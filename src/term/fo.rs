@@ -7,7 +7,7 @@
 
 use std::cmp::max;
 
-use crate::fly::syntax::{Term, UOp};
+use crate::fly::syntax::{BinOp, Term, UOp};
 
 use UOp::*;
 
@@ -61,10 +61,14 @@ fn unrolling(t: &Term) -> Unrolling {
     use Unrolling::Finite;
     match t {
         Term::Literal(_) | Term::Id(_) => Finite(0),
-        Term::App(f, x) => unrolling(f) & max_unrolling(x),
+        Term::App(_f, p, x) => Finite(*p) & max_unrolling(x),
         Term::UnaryOp(Always | Eventually, _) => Unrolling::Infinite,
         Term::UnaryOp(Not, t) => unrolling(t),
-        Term::UnaryOp(Prime, t) => Finite(1) + unrolling(t),
+        Term::UnaryOp(Prime, t) | Term::UnaryOp(Next, t) => Finite(1) + unrolling(t),
+        Term::UnaryOp(Previously, _) | Term::BinOp(BinOp::Since, _, _) => {
+            panic!("attempt to get unrolling of past operator")
+        }
+        Term::BinOp(BinOp::Until, _, _) => Unrolling::Infinite,
         Term::BinOp(_, lhs, rhs) => unrolling(lhs) & unrolling(rhs),
         Term::NAryOp(_, ts) => max_unrolling(ts),
         Term::Ite { cond, then, else_ } => unrolling(cond) & unrolling(then) & unrolling(else_),
@@ -92,27 +96,22 @@ impl FirstOrder {
 
 #[cfg(test)]
 mod tests {
-    use crate::fly::parser::parse_term;
-    use crate::fly::syntax::Term;
+    use crate::fly::parser::term;
 
     use super::FirstOrder;
-
-    fn term(s: &str) -> Term {
-        parse_term(s).unwrap()
-    }
 
     #[test]
     fn test_fo() {
         assert_eq!(
-            FirstOrder::unrolling(&term("p & exists x. r(x) & p -> z(x)")),
+            FirstOrder::unrolling(&term("p & exists x:t. r(x) & p -> z(x)")),
             Some(0),
         );
         assert_eq!(
-            FirstOrder::unrolling(&term("p | q & forall x. r'(x)")),
+            FirstOrder::unrolling(&term("p | q & forall x:t. r'(x)")),
             Some(1),
         );
         assert_eq!(
-            FirstOrder::unrolling(&term("p' | q & (forall x. r'(x))'")),
+            FirstOrder::unrolling(&term("p' | q & (forall x:t. r'(x))'")),
             Some(2),
         );
     }
@@ -124,7 +123,7 @@ mod tests {
             None
         );
         assert_eq!(
-            FirstOrder::unrolling(&term("a | b & exists x. always p(x)")),
+            FirstOrder::unrolling(&term("a | b & exists x:t. always p(x)")),
             None
         );
     }

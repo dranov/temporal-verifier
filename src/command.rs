@@ -1,11 +1,15 @@
 // Copyright 2022-2023 VMware, Inc.
 // SPDX-License-Identifier: BSD-2-Clause
 
+use codespan_reporting::diagnostic::{Diagnostic, Label};
 use std::rc::Rc;
-use std::{env, fs, path::PathBuf, process};
+use std::{fs, path::PathBuf, process};
 
+use crate::inference::houdini;
+use crate::solver::solver_path;
+use crate::timing;
 use crate::{
-    fly::{self, parser::parse_error_diagonistic, printer},
+    fly::{self, parser::parse_error_diagonistic, printer, sorts},
     inference::run_fixpoint,
     inference::UPDR,
     solver::backends::{self, GenericBackend},
@@ -56,8 +60,8 @@ struct VerifyArgs {
     solver: SolverArgs,
 
     #[arg(long)]
-    /// Run Houdini on supplied invariants
-    houdini: bool,
+    /// Print timing statistics
+    time: bool,
 
     /// File name for a .fly file
     file: String,
@@ -67,6 +71,14 @@ struct VerifyArgs {
 struct InferArgs {
     #[command(flatten)]
     solver: SolverArgs,
+
+    #[arg(long)]
+    /// Run the Houdini algorithm to infer invariants
+    houdini: bool,
+
+    #[arg(long)]
+    /// Print timing statistics
+    time: bool,
 
     #[arg(long)]
     /// Try to extend model traces before looking for CEX in the frame
@@ -109,6 +121,7 @@ impl Command {
 
 #[derive(clap::Parser, Debug)]
 #[command(about, long_about=None)]
+/// Entrypoint for the temporal-verifier binary, including all commands.
 pub struct App {
     #[arg(value_enum, long, default_value_t = ColorOutput::Auto)]
     /// Control color output. Auto disables colors with TERM=dumb or
@@ -118,24 +131,6 @@ pub struct App {
     #[command(subcommand)]
     /// Command to run
     command: Command,
-}
-
-fn env_path_fallback(path: &Option<String>, var: &str, fallback: &str) -> String {
-    if let Some(path) = path {
-        return path.into();
-    }
-    if let Some(val) = env::var_os(var) {
-        return val.to_string_lossy().into();
-    }
-    fallback.into()
-}
-
-fn solver_env_var(t: SolverType) -> &'static str {
-    match t {
-        SolverType::Z3 => "Z3_BIN",
-        SolverType::Cvc | SolverType::Cvc5 => "CVC5_BIN",
-        SolverType::Cvc4 => "CVC4_BIN",
-    }
 }
 
 fn solver_default_bin(t: SolverType) -> &'static str {
@@ -153,12 +148,7 @@ impl SolverArgs {
             SolverType::Cvc | SolverType::Cvc5 => backends::SolverType::Cvc5,
             SolverType::Cvc4 => backends::SolverType::Cvc4,
         };
-        let solver_bin = env_path_fallback(
-            // TODO: allow command-line override, which would be Some here
-            &None,
-            solver_env_var(self.solver),
-            solver_default_bin(self.solver),
-        );
+        let solver_bin = solver_path(solver_default_bin(self.solver));
         let tee: Option<PathBuf> = if let Some(path) = &self.smt_file {
             Some(path.to_path_buf())
         } else if self.smt {
@@ -187,6 +177,7 @@ impl InferArgs {
 }
 
 impl App {
+    /// Run the application.
     pub fn exec(self) {
         let file = fs::read_to_string(self.command.file()).expect("could not read input file");
         let files = SimpleFile::new(self.command.file(), &file);
@@ -202,7 +193,7 @@ impl App {
             ..Default::default()
         };
 
-        let m = match fly::parse(&file) {
+        let mut m = match fly::parse(&file) {
             Ok(v) => v,
             Err(err) => {
                 let diagnostic = parse_error_diagonistic((), &err);
@@ -211,13 +202,29 @@ impl App {
             }
         };
 
+        let r = sorts::sort_check_and_infer(&mut m);
+        if let Err((err, span)) = r {
+            eprintln!("sort checking error:");
+
+            let mut diagnostic = Diagnostic::error().with_message(format!("{}", err));
+            if let Some(span) = span {
+                diagnostic = diagnostic.with_labels(vec![Label::primary((), span.start..span.end)]);
+            }
+            terminal::emit(&mut writer.lock(), &config, &files, &diagnostic).unwrap();
+
+            process::exit(1);
+        }
+
         match self.command {
             Command::Print { .. } => {
                 println!("{}", printer::fmt(&m));
             }
-            Command::Verify(ref args @ VerifyArgs { houdini, .. }) => {
+            Command::Verify(ref args) => {
                 let conf = args.get_solver_conf();
-                let r = verify_module(&conf, &m, houdini);
+                let r = verify_module(&conf, &m);
+                if args.time {
+                    timing::report();
+                }
                 match r {
                     Ok(()) => println!("verifies!"),
                     Err(err) => {
@@ -233,9 +240,34 @@ impl App {
                     }
                 }
             }
-            Command::Infer(ref args @ InferArgs { .. }) => {
-                let conf = Rc::new(args.get_solver_conf());
-                run_fixpoint(conf, &m, args.extend_models, args.disj);
+            Command::Infer(ref args @ InferArgs { houdini, .. }) => {
+                if houdini {
+                    let conf = args.get_solver_conf();
+                    let r = houdini::infer_module(&conf, &m);
+                    if args.time {
+                        timing::report();
+                    }
+                    match r {
+                        Ok(()) => println!("verifies!"),
+                        Err(err) => {
+                            eprintln!("verification errors:");
+
+                            for fail in &err.fails {
+                                let diagnostic = fail.diagnostic(());
+                                terminal::emit(&mut writer.lock(), &config, &files, &diagnostic)
+                                    .unwrap();
+                            }
+
+                            process::exit(1);
+                        }
+                    }
+                } else {
+                    let conf = Rc::new(args.get_solver_conf());
+                    run_fixpoint(conf, &m, args.extend_models, args.disj);
+                    if args.time {
+                        timing::report();
+                    }
+                }
             }
             Command::Inline { .. } => {
                 let mut m = m;

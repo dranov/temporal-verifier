@@ -27,7 +27,7 @@ impl Term {
 /// For complete description of the subsumption relation and the weakening process,
 /// see the documentation of [`LemmaQF::subsumes`] and [`LemmaQF::weaken`], respectively.
 ///
-/// See [`crate::inference::pdnf::PDNF`] for an example implementation of [`LemmaQF`].
+/// See [`PDNF`](super::pdnf::PDNF) for an example implementation of [`LemmaQF`].
 pub trait LemmaQF: Clone {
     /// Check whether one LemmaQF subsumes another.
     /// The subsumption relation is assumed to respect semantic consequence;
@@ -51,9 +51,14 @@ pub trait LemmaQF: Clone {
     fn to_term(&self) -> Term;
 }
 
+/// A `QuantifierConfig` defines the terms used by the inference search,
+/// primarily by controlling the quantifier prefixes used.
 pub struct QuantifierConfig {
+    /// List of quantifier prefixes
     pub quantifiers: Vec<Option<Quantifier>>,
+    /// Sort for each prefix in `quantifiers`
     pub sorts: Vec<Sort>,
+    /// Binding names to use for generated invariant clauses.
     pub names: Vec<Vec<String>>,
     // TODO: Add EPR coercion indication
     // pub epr: bool,
@@ -95,7 +100,7 @@ impl QuantifierConfig {
     }
 }
 
-/// Lemma<T: LemmaQF> represents a quantified lemma with a QF matrix of type T.
+/// `Lemma` represents a quantified lemma with a QF matrix of type T.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lemma<T: LemmaQF> {
     quantifiers: Vec<Quantifier>,
@@ -136,7 +141,7 @@ impl<T: LemmaQF> Lemma<T> {
                     .iter()
                     .map(|n| Binder {
                         name: n.clone(),
-                        typ: Some(self.sorts[i].clone()),
+                        sort: self.sorts[i].clone(),
                     })
                     .collect(),
                 body: Box::new(term),
@@ -305,11 +310,11 @@ mod tests {
 
     #[test]
     fn test_weaken() {
-        let typ = |n: usize| Sort::Id(format!("T{n}"));
+        let sort = |n: usize| Sort::Id(format!("T{n}"));
 
         let cfg: QuantifierConfig = QuantifierConfig {
             quantifiers: vec![None, None],
-            sorts: vec![typ(1), typ(3)],
+            sorts: vec![sort(1), sort(3)],
             names: vec![
                 vec!["x11".to_string()],
                 vec!["x31".to_string(), "x32".to_string()],
@@ -370,7 +375,7 @@ mutable c(): T2
 
         let lemma1_vec = lemma0.weaken(&model1, &cfg, None);
         for lemma1 in lemma1_vec.iter() {
-            assert!(lemma0.subsumes(&lemma1));
+            assert!(lemma0.subsumes(lemma1));
             assert_eq!(model1.eval(&lemma1.to_term(), None), 1);
         }
 

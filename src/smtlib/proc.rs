@@ -46,19 +46,29 @@ pub enum SatResp {
 }
 
 #[derive(Error, Debug)]
+/// An error from trying to call the solver
+///
+/// NOTE: this is still highly incomplete and some errors actually result in a
+/// panic.
 pub enum SolverError {
+    /// I/O went wrong
     #[error("some io went wrong")]
     Io(#[from] io::Error),
-    #[error("solver unexpectedly exited")]
-    UnexpectedClose,
+    /// Solver died for some reason
+    #[error("solver unexpectedly exited:\n{0}")]
+    UnexpectedClose(String),
 }
 
 type Result<T> = std::result::Result<T, SolverError>;
 
+/// The full invocation of a solver binary.
 #[derive(Debug, Clone)]
 pub struct SolverCmd {
+    /// Binary to launch
     pub cmd: String,
+    /// Arguments to pass
     pub args: Vec<String>,
+    /// SMT options to send on startup
     pub options: Vec<(String, String)>,
 }
 
@@ -94,10 +104,12 @@ impl SolverCmd {
     }
 }
 
+/// Builder for creating a Z3 [`SolverCmd`].
 #[derive(Debug, Clone)]
 pub struct Z3Conf(SolverCmd);
 
 impl Z3Conf {
+    /// Create a Z3Conf with some default options. Uses `cmd` as the path to Z3.
     pub fn new(cmd: &str) -> Self {
         let mut cmd = SolverCmd {
             cmd: cmd.to_string(),
@@ -107,14 +119,16 @@ impl Z3Conf {
         cmd.args(["-in", "-smt2"]);
         cmd.option("model.completion", "true");
         let mut conf = Self(cmd);
-        conf.timeout_ms(10000);
+        conf.timeout_ms(20000);
         conf
     }
 
+    /// Enable model compaction
     pub fn model_compact(&mut self) {
         self.0.option("model.compact", "true");
     }
 
+    /// Set the SMT timeout option
     pub fn timeout_ms(&mut self, ms: usize) {
         self.0.option("timeout", format!("{ms}"));
     }
@@ -125,6 +139,7 @@ impl Z3Conf {
     }
 }
 
+/// Builder for a CVC4 or CVC5 [`SolverCmd`].
 #[derive(Debug, Clone)]
 pub struct CvcConf {
     version5: bool,
@@ -148,10 +163,12 @@ impl CvcConf {
         Self { version5, cmd }
     }
 
+    /// Create a new CVC4 builder with some default options.
     pub fn new_cvc4(cmd: &str) -> Self {
         Self::new_cvc(cmd, /*version5*/ false)
     }
 
+    /// Create a new CVC5 builder with some default options.
     pub fn new_cvc5(cmd: &str) -> Self {
         Self::new_cvc(cmd, /*version5*/ true)
     }
@@ -176,6 +193,7 @@ impl CvcConf {
         }
     }
 
+    /// Get the final command to run the solver.
     pub fn done(self) -> SolverCmd {
         self.cmd
     }
@@ -274,6 +292,7 @@ impl SmtProc {
         }
     }
 
+    /// Get some attribute using the SMT get-info command.
     pub fn get_info(&mut self, attribute: &str) -> Result<Sexp> {
         let resp = self.send_with_reply(&app("get-info", [atom_s(attribute)]))?;
         match resp {
@@ -291,20 +310,47 @@ impl SmtProc {
         }
     }
 
-    fn parse_sat(&mut self, resp: &str) -> SatResp {
+    /// Parse an error message returned as an s-expression.
+    fn parse_error(resp: &str) -> String {
+        // Z3 returns check-sat errors as:
+        // (error "error msg")
+        // sat
+        //
+        // Thus we parse the result as a sequence of sexps and look for the
+        // error sexp.
+        let sexps = sexp::parse_many(resp)
+            .unwrap_or_else(|err| panic!("could not parse error response {resp}: {err}"));
+        let error_msg = sexps
+            .iter()
+            .filter_map(|s| {
+                s.app().and_then(|(head, args)| {
+                    if head == "error" && args.len() == 1 {
+                        args[0].atom_s()
+                    } else {
+                        None
+                    }
+                })
+            })
+            .next();
+        let msg = error_msg.unwrap_or_else(|| panic!("no error sexp found in {resp}"));
+        msg.to_string()
+    }
+
+    fn parse_sat(&mut self, resp: &str) -> Result<SatResp> {
         if resp == "unsat" {
-            return SatResp::Unsat;
+            return Ok(SatResp::Unsat);
         }
         if resp == "sat" {
-            return SatResp::Sat;
+            return Ok(SatResp::Sat);
         }
         if resp == "unknown" {
             let reason = self
                 .get_info(":reason-unknown")
                 .expect("could not get :reason-unknown");
-            return SatResp::Unknown(reason.to_string());
+            return Ok(SatResp::Unknown(reason.to_string()));
         }
-        panic!("unexpected check-sat response {resp}");
+        let msg = Self::parse_error(resp);
+        return Err(SolverError::UnexpectedClose(msg));
     }
 
     /// Send the solver `(check-sat)`. For unknown gets a reason, but does not
@@ -312,16 +358,20 @@ impl SmtProc {
     pub fn check_sat(&mut self) -> Result<SatResp> {
         self.send(&app("check-sat", []));
         let resp = self.get_response(|s| s.to_string())?;
-        Ok(self.parse_sat(&resp))
+        self.parse_sat(&resp)
     }
 
+    /// Send the solver `(check-sat-assuming)` with some assumed variables
+    /// (which must be atoms, literal symbols or their negations).
+    ///
+    /// The assumptions do not affect subsequent use of the solver.
     pub fn check_sat_assuming(&mut self, assumptions: &[Sexp]) -> Result<SatResp> {
         self.send(&app(
             "check-sat-assuming",
             vec![sexp_l(assumptions.to_vec())],
         ));
         let resp = self.get_response(|s| s.to_string())?;
-        Ok(self.parse_sat(&resp))
+        self.parse_sat(&resp)
     }
 
     /// Run `(get-unsat-assumptions)` following an unsat response to get the
@@ -363,7 +413,8 @@ impl SmtProc {
             // including the newline)
             let n = self.stdout.read_line(&mut buf)?;
             if n == 0 {
-                return Err(SolverError::UnexpectedClose);
+                let msg = Self::parse_error(&buf);
+                return Err(SolverError::UnexpectedClose(msg));
             }
             // last line, without the newline
             let last_line = &buf[last_end..last_end + n - 1];
@@ -403,9 +454,12 @@ impl SmtProc {
 
 #[cfg(test)]
 mod tests {
-    use crate::smtlib::{
-        proc::{CvcConf, SatResp, Z3Conf},
-        sexp::{app, atom_s, parse},
+    use crate::{
+        smtlib::{
+            proc::{CvcConf, SatResp, Z3Conf},
+            sexp::{app, atom_s, parse},
+        },
+        solver::solver_path,
     };
     use eyre::Context;
 
@@ -413,7 +467,7 @@ mod tests {
 
     #[test]
     fn test_check_sat_z3() {
-        let z3 = Z3Conf::new("z3").done();
+        let z3 = Z3Conf::new(&solver_path("z3")).done();
         let mut solver = SmtProc::new(z3, None).unwrap();
         let response = solver.check_sat().wrap_err("could not check-sat").unwrap();
         assert!(
@@ -424,7 +478,7 @@ mod tests {
 
     #[test]
     fn test_get_model_z3() {
-        let z3 = Z3Conf::new("z3").done();
+        let z3 = Z3Conf::new(&solver_path("z3")).done();
         let mut solver = SmtProc::new(z3, None).unwrap();
         solver.send(&app("declare-const", [atom_s("a"), atom_s("Bool")]));
 
@@ -441,7 +495,7 @@ mod tests {
     /// We tried to pass --strict-parsing by default, which causes CVC5 to
     /// reject (or b) (it requires 2 or more disjuncts to the or).
     fn test_cvc5_singleton_or() {
-        let cvc5 = CvcConf::new_cvc5("cvc5").done();
+        let cvc5 = CvcConf::new_cvc5(&solver_path("cvc5")).done();
         let mut solver = if let Ok(solver) = SmtProc::new(cvc5, None) {
             solver
         } else {
@@ -457,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_spawn_many() {
-        let z3 = Z3Conf::new("z3").done();
+        let z3 = Z3Conf::new(&solver_path("z3")).done();
         // launching z3 is slow on macos so don't spawn too many
         #[cfg(target_os = "macos")]
         let num_iters = 200;
@@ -466,5 +520,36 @@ mod tests {
         for _ in 0..num_iters {
             let _ = SmtProc::new(z3.clone(), None).unwrap();
         }
+    }
+
+    #[test]
+    fn test_cvc5_ill_formed() {
+        let cvc = CvcConf::new_cvc5(&solver_path("cvc5")).done();
+        let mut proc = SmtProc::new(cvc, None).unwrap();
+        let e = parse("(assert (= and or))").unwrap();
+        proc.send(&e);
+        let r = proc.check_sat();
+        insta::assert_display_snapshot!(r.unwrap_err());
+    }
+
+    #[test]
+    fn test_cvc4_ill_formed() {
+        let cvc = CvcConf::new_cvc4(&solver_path("cvc4")).done();
+        let mut proc = SmtProc::new(cvc, None).unwrap();
+        let e = parse("(assert (= and or))").unwrap();
+        proc.send(&e);
+        let r = proc.check_sat();
+        insta::assert_display_snapshot!(r.unwrap_err());
+    }
+
+    #[test]
+    fn test_z3_ill_formed() {
+        let z3 = Z3Conf::new(&solver_path("z3")).done();
+        let mut proc = SmtProc::new(z3, None).unwrap();
+        // unbound symbol
+        let e = parse("(assert p)").unwrap();
+        proc.send(&e);
+        let r = proc.check_sat();
+        insta::assert_display_snapshot!(r.unwrap_err());
     }
 }

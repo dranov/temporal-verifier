@@ -27,7 +27,7 @@ fn with_next(t: &Term, bound: im::HashSet<String>, next: usize) -> Term {
             if bound.contains(s) { 0 } else { next },
         ),
         // TODO: we do not add primes to arguments; this is just a heuristic
-        Term::App(f, xs) => Term::App(go_box(f), xs.iter().map(go).collect()),
+        Term::App(f, p, xs) => Term::App(f.clone(), p + next, xs.iter().map(go).collect()),
 
         // boring recursive cases
         Term::Literal(b) => Term::Literal(*b),
@@ -73,26 +73,21 @@ impl Next {
 
 #[cfg(test)]
 mod tests {
-    use crate::fly::parser::parse_term;
-    use crate::fly::syntax::Term;
+    use crate::fly::parser::term;
 
     use super::Next;
-
-    fn term(s: &str) -> Term {
-        parse_term(s).unwrap()
-    }
 
     #[test]
     fn test_normalize() {
         assert_eq!(Next::normalize(&term("r'(x) | z")), term("r'(x) | z"));
         assert_eq!(
-            Next::normalize(&term("(r(x) | z & forall x. p(x)')'")),
+            Next::normalize(&term("(r(x) | z & forall x:t. p(x)')'")),
             // this x gets primed because it's a free variable
-            term("r'(x') | z' & forall x. p''(x)")
+            term("r'(x') | z' & forall x:t. p''(x)")
         );
         assert_eq!(
-            Next::prime(&term("r(x) | z & forall x. p(x)'")),
-            term("r'(x') | z' & forall x. p''(x)")
+            Next::prime(&term("r(x) | z & forall x:t. p(x)'")),
+            term("r'(x') | z' & forall x:t. p''(x)")
         );
     }
 }

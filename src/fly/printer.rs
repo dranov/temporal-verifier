@@ -18,10 +18,12 @@ fn precedence(t: &Term) -> usize {
         Ite { .. } => 30,
         NAryOp(Or, _) => 40,
         NAryOp(And, _) => 50,
+        BinOp(Until | Since, _, _) => 52,
+        UnaryOp(Next | Previously, _) => 54,
         BinOp(Equals | NotEquals, _, _) => 60,
         UnaryOp(Not, _) => 70,
         UnaryOp(Prime, _) => 80,
-        Literal(_) | Id(_) | App(_, _) => 1000,
+        Literal(_) | Id(_) | App(_, _, _) => 1000,
     }
 }
 
@@ -34,7 +36,7 @@ fn parens(add_parens: bool, s: String) -> String {
 }
 
 fn right_associative(op: &BinOp) -> bool {
-    matches!(op, BinOp::Implies)
+    matches!(op, BinOp::Implies | BinOp::Since | BinOp::Until)
 }
 
 fn left_associative(_op: &BinOp) -> bool {
@@ -42,11 +44,7 @@ fn left_associative(_op: &BinOp) -> bool {
 }
 
 fn binder(b: &Binder) -> String {
-    if let Some(t) = &b.typ {
-        format!("{}:{}", b.name, sort(t))
-    } else {
-        b.name.to_string()
-    }
+    format!("{}:{}", b.name, sort(&b.sort))
 }
 
 pub fn term(t: &Term) -> String {
@@ -56,9 +54,10 @@ pub fn term(t: &Term) -> String {
         Term::Literal(false) => "false".to_string(),
         Term::Literal(true) => "true".to_string(),
         Term::Id(i) => i.to_string(),
-        Term::App(f, args) => format!(
-            "{}({})",
-            term(f),
+        Term::App(f, p, args) => format!(
+            "{}{}({})",
+            f,
+            "\'".repeat(*p),
             args.iter().map(term).collect::<Vec<_>>().join(", ")
         ),
         Term::UnaryOp(op, arg) => {
@@ -68,6 +67,8 @@ pub fn term(t: &Term) -> String {
                 UOp::Prime => format!("{arg}'"),
                 UOp::Always => format!("always {arg}"),
                 UOp::Eventually => format!("eventually {arg}"),
+                UOp::Next => format!("X {arg}"),
+                UOp::Previously => format!("X^-1 {arg}"),
             }
         }
         Term::BinOp(op, arg1, arg2) => {
@@ -82,6 +83,8 @@ pub fn term(t: &Term) -> String {
                 BinOp::NotEquals => "!=",
                 BinOp::Implies => "->",
                 BinOp::Iff => "<->",
+                BinOp::Until => "until",
+                BinOp::Since => "since",
             };
             format!("{left} {op} {right}")
         }
@@ -128,10 +131,10 @@ impl fmt::Display for Term {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fly::parser::parse_term;
+    use crate::fly::parser;
 
     fn parse(s: &str) -> Term {
-        parse_term(s).expect("invalid term in test")
+        parser::term(s)
     }
 
     fn reprint(s: &str) -> String {
@@ -142,7 +145,7 @@ mod tests {
     fn test_printer_basic() {
         let e = parse("a & b | c");
         insta::assert_display_snapshot!(term(&e), @"a & b | c");
-        assert_eq!(parse_term(&term(&e)), Ok(e));
+        assert_eq!(parse(&term(&e)), e);
     }
 
     #[test]
@@ -165,6 +168,12 @@ mod tests {
         assert_eq!(parse(&term(&e)), e);
 
         insta::assert_display_snapshot!(reprint("forall x:t1, y:t2. f(x, y)"), @"forall x:t1, y:t2. f(x, y)");
+
+        insta::assert_display_snapshot!(reprint("eventually X p until X q"), @"eventually X p until X q");
+        insta::assert_display_snapshot!(reprint("eventually (X p) until (X q)"), @"eventually X p until X q");
+
+        insta::assert_display_snapshot!(reprint("p until q since always r"), @"p until q since (always r)");
+        insta::assert_display_snapshot!(reprint("p until (q since (always r))"), @"p until q since (always r)");
     }
 
     #[test]
@@ -181,6 +190,9 @@ mod tests {
         insta::assert_display_snapshot!(
           reprint("(always a)' & eventually (c=d)'"),
            @"(always a)' & (eventually (c = d)')");
+
+        let s = "(p until q) since (always r)";
+        assert_eq!(parse(s), parse(&reprint(s)));
     }
 }
 
@@ -201,9 +213,9 @@ fn relation_decl(decl: &RelationDecl) -> String {
             decl.args.iter().map(sort).collect::<Vec<_>>().join(", ")
         )
     };
-    let typ = sort(&decl.typ);
+    let sort = sort(&decl.sort);
     format!(
-        "{} {name}{args}: {typ}",
+        "{} {name}{args}: {sort}",
         if decl.mutable { "mutable" } else { "immutable" },
     )
 }
@@ -213,7 +225,7 @@ fn signature(sig: &Signature) -> String {
         .sorts
         .iter()
         // end with trailing newline if there are any sorts
-        .map(|s| format!("sort {}\n", sort(s)))
+        .map(|s| format!("sort {}\n", s))
         .collect::<Vec<_>>()
         .join("");
     let relations = sig
@@ -226,7 +238,7 @@ fn signature(sig: &Signature) -> String {
 }
 
 fn def_binder(binder: &Binder) -> String {
-    format!("{}: {}", &binder.name, sort(binder.typ.as_ref().unwrap()))
+    format!("{}: {}", &binder.name, sort(&binder.sort))
 }
 
 fn def(def: &Definition) -> String {
@@ -236,10 +248,10 @@ fn def(def: &Definition) -> String {
         .map(def_binder)
         .collect::<Vec<_>>()
         .join(", ");
-    let ret_typ = sort(&def.ret_typ);
+    let ret_sort = sort(&def.ret_sort);
     let body = term(&def.body);
     format!(
-        "def {name}({binders}) -> {ret_typ} {{\n  {body}\n}}",
+        "def {name}({binders}) -> {ret_sort} {{\n  {body}\n}}",
         name = &def.name
     )
 }

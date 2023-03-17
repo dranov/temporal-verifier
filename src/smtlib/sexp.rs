@@ -11,6 +11,7 @@ use std::fmt;
 use peg::str::LineCol;
 use serde::Serialize;
 
+#[allow(missing_docs)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Atom {
     I(usize),
@@ -28,6 +29,8 @@ impl Atom {
     }
 }
 
+/// An s-expression which also tracks comments.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Sexp {
     Atom(Atom),
@@ -122,6 +125,7 @@ impl Sexp {
         }
     }
 
+    /// Return the inner string if self is a string atom.
     pub fn atom_s(&self) -> Option<&str> {
         if let Sexp::Atom(Atom::S(s)) = self {
             Some(s)
@@ -130,6 +134,7 @@ impl Sexp {
         }
     }
 
+    /// Return the head and tail if self is of the form `(head rest..)`.
     pub fn app(&self) -> Option<(&str, &[Sexp])> {
         self.list().and_then(|ss| {
             if !ss.is_empty() {
@@ -181,14 +186,23 @@ grammar parser() for str {
   /// Parse an sexp but be tolerant to whitespace around it.
   pub(super) rule sexp_whitespace() -> Sexp
   = _ s:sexp() _ { s }
+
+  /// Parse a sequence of sexps.
+  pub(super) rule sexps() -> Vec<Sexp>
+  = _ ss:(sexp() ** _) _ { ss }
 }
 }
 
-/// Parse a sequence of sexps.
+/// Parse an sexp.
 ///
 /// Allows whitespace before or after.
 pub fn parse(s: &str) -> Result<Sexp, peg::error::ParseError<LineCol>> {
     parser::sexp_whitespace(s)
+}
+
+/// Parse a sequence of sexps, separated by whitespace.
+pub fn parse_many(s: &str) -> Result<Vec<Sexp>, peg::error::ParseError<LineCol>> {
+    parser::sexps(s)
 }
 
 #[cfg(test)]

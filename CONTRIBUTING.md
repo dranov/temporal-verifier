@@ -25,7 +25,10 @@ month).
 ## Must-haves for every commit pushed to this repository
 
 * Do not push to `main` without asking. Instead, use a branch and create a pull request.
-* Every commit must be signed (see above). Use `git -s` or otherwise add `Signed-off-by: Your Name <your@email.com>` to the last line of each Git commit message.
+* Every commit must be signed (see above). Use `git -s` or otherwise add
+  `Signed-off-by: Your Name <your@email.com>` to the last line of each Git
+  commit message. You can get git to add this line automatically when you start
+  editing a commit message by copying `tools/prepare-commit-msg` to `.git/hooks/`.
 * Every code file in the repository must start with a two-line copyright notice:
   ```rust
   // Copyright 2022-2023 VMware, Inc.
@@ -36,9 +39,10 @@ month).
   # Copyright 2022-2023 VMware, Inc.
   # SPDX-License-Identifier: BSD-2-Clause
   ```
-* Before creating a commit, make sure the following tests pass (these are run by CI on GitHub, so the commit will get a :x: if they don't):
+* Before creating a commit, make sure the following tests pass (these are run by CI on GitHub, so the commit will get a :x: if they don't). You can run `./tools/ci-check.sh` to run all of these automatically.
   * `cargo test`
   * Use `cargo fmt` to format the code. You can use the "format on save" setting in VS Code to have this done automatically.
+  * Run `cargo clippy --tests` and make sure there are no warnings. In VS Code you can run this check automatically on save by opening user preferences and adding `"rust-analyzer.checkOnSave.command": "clippy"`.
 * Commit messages should generally follow this [style guide](http://chris.beams.io/posts/git-commit/). In short:
   * Use a short summary title, and add a longer body if needed.
   * Use imperative style ("Fix bug" and not "Fixed bug", "Fixes bug", or "Bugfix"). The title should read like "if you apply it, this commit will ..." or "after applying this commit, the code will...".
@@ -97,6 +101,8 @@ Before submitting your pull request, we advise you to use the following:
 1. Check if your code changes will pass both code linting and format checks (`cargo fmt --check`) and unit and regression tests (`cargo test`).
 2. Ensure your commit messages are descriptive. We follow the conventions on [How to Write a Git Commit Message](http://chris.beams.io/posts/git-commit/). Be sure to include any related GitHub issue references in the commit message. See [GFM syntax](https://guides.github.com/features/mastering-markdown/#GitHub-flavored-markdown) for referencing issues and commits.
 3. Check the commits and commits messages and ensure they are free from typos.
+4. Any new modules or new public functions should have a rustdoc comment.
+5. Strive for 100% statement coverage via tests (unit tests or snapshot tests are both good). For example, if you are writing a function that traverses the AST, make sure there is a test where every possible kind of AST node is passed to your function. Don't forget to test error paths, especially for user-facing code. Users make great fuzzers, so you shouldn't assume anything about user-provided input that you haven't checked yourself.
 
 ## Reporting Bugs and Creating Issues
 

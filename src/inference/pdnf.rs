@@ -228,51 +228,29 @@ impl LemmaQF for PDNF {
 }
 
 #[cfg(test)]
+#[allow(clippy::redundant_clone)]
 mod tests {
     use super::*;
-    use crate::fly::parser::parse_term;
+    use crate::fly::parser::term;
 
     #[test]
     fn test_add_literal_add_cube() {
-        let p1 = PDNF::from_dnf(
-            2,
-            None,
-            &parse_term(&"a | !b | (c & d) | (!d & e & !f & g)").unwrap(),
-        );
-        let p1_add_nc = PDNF::from_dnf(
-            2,
-            None,
-            &parse_term(&"a | !b | !c | d | (e & !f & g)").unwrap(),
-        );
-        let p1_add_nd = PDNF::from_dnf(2, None, &parse_term(&"a | !b | c | !d").unwrap());
-        let p1_add_e_nf = PDNF::from_dnf(
-            2,
-            None,
-            &parse_term(&"a | !b | (c & d) | (e & !f)").unwrap(),
-        );
+        let p1 = PDNF::from_dnf(2, None, &term("a | !b | (c & d) | (!d & e & !f & g)"));
+        let p1_add_nc = PDNF::from_dnf(2, None, &term("a | !b | !c | d | (e & !f & g)"));
+        let p1_add_nd = PDNF::from_dnf(2, None, &term("a | !b | c | !d"));
+        let p1_add_e_nf = PDNF::from_dnf(2, None, &term("a | !b | (c & d) | (e & !f)"));
 
-        let p2 = PDNF::from_dnf(
-            3,
-            None,
-            &parse_term(&"a | !b | (c & d) | (!d & c)").unwrap(),
-        );
-        let p2_add_nd_ne = PDNF::from_dnf(
-            3,
-            None,
-            &parse_term(&"a | !b | (c & d) | (!d & c) | (!d & !e)").unwrap(),
-        );
-        let p3 = PDNF::from_dnf(
-            3,
-            None,
-            &parse_term(&"a | !b | (c & d) | (!d & e) | (!d & !e)").unwrap(),
-        );
+        let p2 = PDNF::from_dnf(3, None, &term("a | !b | (c & d) | (!d & c)"));
+        let p2_add_nd_ne =
+            PDNF::from_dnf(3, None, &term("a | !b | (c & d) | (!d & c) | (!d & !e)"));
+        let p3 = PDNF::from_dnf(3, None, &term("a | !b | (c & d) | (!d & e) | (!d & !e)"));
 
-        let a = parse_term(&"a").unwrap();
-        let b = parse_term(&"b").unwrap();
-        let c = parse_term(&"c").unwrap();
-        let d = parse_term(&"d").unwrap();
-        let e = parse_term(&"e").unwrap();
-        let f = parse_term(&"f").unwrap();
+        let a = term("a");
+        let b = term("b");
+        let c = term("c");
+        let d = term("d");
+        let e = term("e");
+        let f = term("f");
 
         assert!(p1.add_literal(a.clone()).unwrap().equiv(&p1));
         assert_eq!(p1.add_literal(a.flip()), None);
@@ -317,28 +295,20 @@ mod tests {
 
     #[test]
     fn test_subsumes_weaken() {
-        let p1 = PDNF::from_dnf(
-            2,
-            None,
-            &parse_term(&"a | b | (c & d) | (e & f & g)").unwrap(),
-        );
-        let p2 = PDNF::from_dnf(
-            2,
-            None,
-            &parse_term(&"a | b | d | (!e & f) | (f & g)").unwrap(),
-        );
+        let p1 = PDNF::from_dnf(2, None, &term("a | b | (c & d) | (e & f & g)"));
+        let p2 = PDNF::from_dnf(2, None, &term("a | b | d | (!e & f) | (f & g)"));
 
         let c1 = vec![
-            parse_term(&"!a").unwrap(),
-            parse_term(&"!b").unwrap(),
-            parse_term(&"!c").unwrap(),
-            parse_term(&"d").unwrap(),
-            parse_term(&"e").unwrap(),
-            parse_term(&"f").unwrap(),
-            parse_term(&"!g").unwrap(),
+            term("!a"),
+            term("!b"),
+            term("!c"),
+            term("d"),
+            term("e"),
+            term("f"),
+            term("!g"),
         ];
         let mut p_c1 = PDNF::get_false(2, None);
-        p_c1.cubes.push(c1.iter().cloned().collect());
+        p_c1.cubes.push(c1.to_vec());
 
         assert!(p1.subsumes(&p2));
         assert!(!p2.subsumes(&p1));
@@ -346,15 +316,15 @@ mod tests {
         assert!(p_c1.subsumes(&p2));
 
         // Subsumption is reflexive
-        assert_eq!(p1.subsumes(&p1), true);
-        assert_eq!(p2.subsumes(&p2), true);
+        assert!(p1.subsumes(&p1));
+        assert!(p2.subsumes(&p2));
 
         // Simple cases
-        assert_eq!(p1.subsumes(&p2), true);
-        assert_eq!(p2.subsumes(&p1), false);
+        assert!(p1.subsumes(&p2));
+        assert!(!p2.subsumes(&p1));
 
         let p1_w = p1.weaken(c1.clone());
-        let p2_w = p2.weaken(c1.clone());
+        let p2_w = p2.weaken(c1);
 
         // Check if weakened
         for p in p1_w.iter() {
