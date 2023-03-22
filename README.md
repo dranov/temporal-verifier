@@ -11,10 +11,11 @@ correctness properties, including safety and liveness.
 
 ## Try it out
 
-Run `./tools/download-solvers.sh` to get compatible versions of the supported SMT solvers (Z3, CVC5, and CVC4).
+Run `./tools/download-solvers.sh` (`.\tools\download-solvers.ps1` on Windows)
+to get compatible versions of the supported SMT solvers (Z3, CVC5, and CVC4).
 
 ```sh
-cargo run -- verify examples/lockserver.fly`
+cargo run -- verify examples/lockserver.fly
 
 cargo run -- infer examples/lockserver.fly --quantifier "F node n1 n2" --kpdnf-lit 3
 
